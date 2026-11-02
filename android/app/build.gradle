@@ -1,3 +1,4 @@
+
 plugins {
     id 'com.android.application'
 }
@@ -10,17 +11,19 @@ android {
         applicationId "com.meturtv.app"
         minSdk 21
         targetSdk 34
-        versionCode 1
-        versionName "2.4.0"
 
-        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        // Automatically supplied by GitHub Actions
+        versionCode (project.findProperty("VERSION_CODE") ?: "1").toInteger()
+        versionName project.findProperty("VERSION_NAME") ?: "2.4.0"
+
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
     }
 
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            signingConfig signingConfigs.debug // Uses debug signature for easy TV sideloading
+            signingConfig signingConfigs.debug
         }
     }
 
