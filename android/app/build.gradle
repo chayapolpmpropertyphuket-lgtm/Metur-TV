@@ -7,17 +7,21 @@ android {
     namespace 'com.meturtv.app'
     compileSdk 34
 
+    
     defaultConfig {
         applicationId "com.meturtv.app"
         minSdk 21
         targetSdk 34
 
-        // Automatically supplied by GitHub Actions
-        versionCode (project.findProperty("VERSION_CODE") ?: "1").toInteger()
-        versionName project.findProperty("VERSION_NAME") ?: "2.4.0"
+        versionCode = providers.gradleProperty("VERSION_CODE")
+            .getOrElse("1").toInteger()
 
-        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+        versionName = providers.gradleProperty("VERSION_NAME")
+            .getOrElse("2.4.0")
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
+
 
     buildTypes {
         release {
