@@ -107,6 +107,8 @@ jobs:
       # 9. Setup Android SDK
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
 
       - name: Install Android SDK Components
         run: |
