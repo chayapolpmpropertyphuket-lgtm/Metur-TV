@@ -21,8 +21,9 @@ jobs:
           node-version: 20
           cache: 'npm'
 
-      - name: Install Frontend Dependencies
+      - name: Install dependencies
         run: npm install --legacy-peer-deps
+
 
       - name: Build Web Application
         run: npm run build
