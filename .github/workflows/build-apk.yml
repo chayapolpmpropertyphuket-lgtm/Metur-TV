@@ -50,9 +50,8 @@ jobs:
         run: chmod +x android/gradlew || true
 
       - name: Build Android TV APK
-        run: |
-          cd android
-          gradle assembleRelease --no-daemon || ./gradlew assembleRelease --no-daemon
+        working-directory: ./android
+        run: gradle assembleRelease --no-daemon || ./gradlew assembleRelease --no-daemon
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
