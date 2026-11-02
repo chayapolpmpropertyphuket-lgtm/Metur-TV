@@ -22,7 +22,7 @@ jobs:
           cache: 'npm'
 
       - name: Install Frontend Dependencies
-        run: npm ci
+        run: npm ci --legacy-peer-deps
 
       - name: Build Web Application
         run: npm run build
