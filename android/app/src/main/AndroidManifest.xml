@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools"
-    package="com.meturtv.app">
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Permissions for Streaming, Voice Search, and Network -->
     <uses-permission android:name="android.permission.INTERNET" />
