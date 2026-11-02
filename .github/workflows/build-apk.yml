@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - main
-
   workflow_dispatch:
 
 permissions:
@@ -21,13 +20,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout repository and tags
+      # 1. Checkout
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # 2. Generate automatic version
+      # 2. Generate Version
       - name: Generate Release Version
         id: version
         shell: bash
@@ -43,16 +42,12 @@ jobs:
             VERSION="2.4.0"
           else
             VERSION="${LATEST_TAG#v}"
-
             IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
-
             PATCH=$((PATCH + 1))
-
             VERSION="${MAJOR}.${MINOR}.${PATCH}"
           fi
 
           IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
-
           VERSION_CODE=$((MAJOR * 1000000 + MINOR * 1000 + PATCH))
 
           TAG="v${VERSION}"
@@ -61,16 +56,16 @@ jobs:
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "version_code=${VERSION_CODE}" >> "$GITHUB_OUTPUT"
 
-          echo "Release version: ${TAG}"
-          echo "Android versionCode: ${VERSION_CODE}"
+          echo "Release: ${TAG}"
+          echo "Version Code: ${VERSION_CODE}"
 
-      # 3. Setup Node.js
+      # 3. Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      # 4. Install dependencies
+      # 4. Dependencies
       - name: Install Dependencies
         run: |
           if [ -f package-lock.json ]; then
@@ -79,32 +74,32 @@ jobs:
             npm install --legacy-peer-deps
           fi
 
-      # 5. Build website
+      # 5. Build Website
       - name: Build Web Application
         run: npm run build
 
       # 6. Verify dist
       - name: Verify Web Build
         run: |
-          if [ ! -d "dist" ]; then
+          test -d dist || {
             echo "ERROR: dist folder not found!"
             exit 1
-          fi
+          }
 
-      # 7. Copy web files into Android
+      # 7. Copy Web Files
       - name: Copy Web Build to Android
         run: |
           mkdir -p android/app/src/main/assets/dist
           cp -R dist/. android/app/src/main/assets/dist/
 
-      # 8. Setup Java 17
+      # 8. Java 17
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
 
-      # 9. Setup Android SDK
+      # 9. Android SDK
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
@@ -114,36 +109,49 @@ jobs:
         run: |
           sdkmanager "platforms;android-34" "build-tools;34.0.0"
 
-      # 10. Setup Gradle
+      # 10. Install Gradle 8.4 directly
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.4'
 
-      # 11. Verify Gradle wrapper
-      - name: Verify Gradle Wrapper
+      # 11. Verify Android Project
+      - name: Verify Android Project
         run: |
-          if [ ! -f android/gradlew ]; then
-            echo "ERROR: android/gradlew not found!"
+          if [ ! -f android/settings.gradle ] && \
+             [ ! -f android/settings.gradle.kts ]; then
+            echo "ERROR: Android Gradle settings not found!"
             exit 1
           fi
 
-          chmod +x android/gradlew
+          if [ ! -f android/app/build.gradle ] && \
+             [ ! -f android/app/build.gradle.kts ]; then
+            echo "ERROR: Android app build file not found!"
+            exit 1
+          fi
 
-      # 12. Build APK with automatic version
+      # 12. Build APK without requiring gradlew
       - name: Build Release APK
         working-directory: android
         run: |
-          ./gradlew assembleRelease \
+          gradle assembleRelease \
             -PVERSION_CODE=${{ steps.version.outputs.version_code }} \
             -PVERSION_NAME=${{ steps.version.outputs.version }} \
             --no-daemon
 
-      # 13. Verify and rename APK
+      # 13. Verify APK
       - name: Prepare APK
         run: |
+          echo "Searching for APK..."
+
+          find android/app/build/outputs/apk -type f -name "*.apk" || true
+
           APK_PATH="android/app/build/outputs/apk/release/app-release.apk"
 
           if [ ! -f "$APK_PATH" ]; then
-            echo "ERROR: APK file not found!"
+            echo "ERROR: Expected release APK not found!"
+            echo "Checking build outputs..."
+            find android/app/build/outputs -type f || true
             exit 1
           fi
 
@@ -152,7 +160,7 @@ jobs:
           cp "$APK_PATH" \
             "release/Metur-TV-${{ steps.version.outputs.tag }}.apk"
 
-      # 14. Create GitHub Release
+      # 14. Publish Release
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
