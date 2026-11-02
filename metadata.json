@@ -1,0 +1,6 @@
+{
+  "name": "Lenna TV - Minimal Media Player",
+  "description": "Modern, minimal Android TV media player & client for W3U, M3U/M3U8 playlists, Jellyfin, Emby, and Plex servers inspired by Lenna iOS design.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
