@@ -4,13 +4,13 @@ import { MediaItem, W3UPlaylist, W3UItem } from '../types';
  * Real Parser for Wiseplay W3U JSON playlist format
  * Supports standard format, nested groups, stations, and header directives
  */
-export function parseW3U(jsonContent: string, sourceName = 'Wiseplay List'): {
+export function parseW3U(jsonContent: string, sourceName = 'Wiseplay List', baseUrl?: string): {
   playlist: W3UPlaylist;
   items: MediaItem[];
   groups: string[];
 } {
   try {
-    const data = JSON.parse(jsonContent);
+    const data = JSON.parse(jsonContent.replace(/^\uFEFF/, ''));
     const playlistName = data.name || sourceName;
     const items: MediaItem[] = [];
     const groupSet = new Set<string>();
@@ -30,7 +30,11 @@ export function parseW3U(jsonContent: string, sourceName = 'Wiseplay List'): {
       }
 
       const id = `w3u-${Math.random().toString(36).substring(2, 9)}`;
-      const isHls = station.url?.includes('.m3u8');
+      let streamUrl = station.url || '';
+      if (baseUrl && streamUrl && !/^[a-z][a-z0-9+.-]*:/i.test(streamUrl)) {
+        try { streamUrl = new URL(streamUrl, baseUrl).toString(); } catch { /* Keep the original URL for validation downstream. */ }
+      }
+      const isHls = streamUrl.toLowerCase().includes('.m3u8');
 
       items.push({
         id,
@@ -39,7 +43,7 @@ export function parseW3U(jsonContent: string, sourceName = 'Wiseplay List'): {
         backdrop: station.image || 'https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?w=1280&auto=format&fit=crop&q=80',
         type: isHls ? 'channel' : 'stream',
         sourceType: 'w3u',
-        streamUrl: station.url || '',
+        streamUrl,
         group: groupName,
         serverName: playlistName,
         resolution: '1080p',
