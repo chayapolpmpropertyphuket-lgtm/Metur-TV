@@ -20,6 +20,8 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.webkit.ValueCallback;
+import android.webkit.WebChromeClient.FileChooserParams;
 import android.webkit.JavascriptInterface;
 import androidx.webkit.WebViewAssetLoader;
 import androidx.annotation.NonNull;
@@ -39,6 +41,8 @@ public class MainActivity extends AppCompatActivity {
     private boolean nativePlayerWasOpened = false;
     private static final int RECORD_AUDIO_PERMISSION_REQUEST = 101;
     private PermissionRequest mCurrentPermissionRequest;
+    private ValueCallback<Uri[]> mFilePathCallback;
+    private static final int FILE_PICKER_REQUEST = 202;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -143,6 +147,31 @@ public class MainActivity extends AppCompatActivity {
         });
 
         mWebView.setWebChromeClient(new WebChromeClient() {
+            // Android's Storage Access Framework exposes USB drives and other document
+            // providers without requesting broad filesystem permissions.
+            @Override
+            public boolean onShowFileChooser(WebView webView, ValueCallback<Uri[]> filePathCallback,
+                    FileChooserParams fileChooserParams) {
+                if (mFilePathCallback != null) {
+                    mFilePathCallback.onReceiveValue(null);
+                }
+                mFilePathCallback = filePathCallback;
+                Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                intent.setType("*/*");
+                intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE,
+                        fileChooserParams.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE);
+                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                try {
+                    startActivityForResult(intent, FILE_PICKER_REQUEST);
+                    return true;
+                } catch (Exception exception) {
+                    mFilePathCallback = null;
+                    filePathCallback.onReceiveValue(null);
+                    return false;
+                }
+            }
+
             // Auto-grant microphone for Voice Search
             @Override
             public void onPermissionRequest(final PermissionRequest request) {
@@ -181,6 +210,36 @@ public class MainActivity extends AppCompatActivity {
                     new String[]{Manifest.permission.RECORD_AUDIO},
                     RECORD_AUDIO_PERMISSION_REQUEST);
         }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == FILE_PICKER_REQUEST && mFilePathCallback != null) {
+            Uri[] results = null;
+            if (resultCode == RESULT_OK && data != null) {
+                if (data.getClipData() != null) {
+                    int count = data.getClipData().getItemCount();
+                    results = new Uri[count];
+                    for (int i = 0; i < count; i++) {
+                        results[i] = data.getClipData().getItemAt(i).getUri();
+                    }
+                } else if (data.getData() != null) {
+                    results = new Uri[]{data.getData()};
+                }
+            }
+            mFilePathCallback.onReceiveValue(results);
+            mFilePathCallback = null;
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (mFilePathCallback != null) {
+            mFilePathCallback.onReceiveValue(null);
+            mFilePathCallback = null;
+        }
+        super.onDestroy();
     }
 
     @Override
