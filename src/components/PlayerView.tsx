@@ -80,16 +80,46 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
 
     setStreamError(null);
     const url = item.streamUrl;
+    const streamHeaders = item.headers ?? {};
+    const hasCustomHeaders = Object.keys(streamHeaders).length > 0;
+    const isHlsSource = url.toLowerCase().includes('.m3u8') || item.type === 'channel';
 
-    if (Hls.isSupported() && (url.includes('.m3u8') || item.type === 'channel')) {
+    // HTMLVideoElement and native HLS playback cannot attach arbitrary request
+    // headers. Use hls.js for HLS streams when possible, and fail clearly rather
+    // than silently making a request that omits playlist authentication headers.
+    if (hasCustomHeaders && (!isHlsSource || !Hls.isSupported())) {
+      setStreamError('สตรีมนี้ต้องใช้ HTTP Headers เพิ่มเติม แต่อุปกรณ์เล่นวิดีโอแบบ Native ไม่รองรับการส่ง Headers กรุณาใช้ HLS ที่เล่นผ่าน hls.js หรือ URL ที่ไม่ต้องใช้ Headers');
+      return;
+    }
+
+    if (Hls.isSupported() && isHlsSource) {
       if (hlsRef.current) {
         hlsRef.current.destroy();
       }
+
+      const applyHeaders = (headers: Headers) => {
+        Object.entries(streamHeaders).forEach(([name, value]) => {
+          // These are browser-controlled or security-sensitive request headers.
+          if (/^(host|cookie|origin|content-length|connection|referer)$/i.test(name)) return;
+          try { headers.set(name, value); } catch { /* Ignore invalid browser headers. */ }
+        });
+      };
 
       const hls = new Hls({
         maxBufferLength: settings.bufferSizeMB > 64 ? 60 : 30,
         enableWorker: true,
         lowLatencyMode: true,
+        xhrSetup: (xhr) => {
+          Object.entries(streamHeaders).forEach(([name, value]) => {
+            if (/^(host|cookie|origin|content-length|connection|referer)$/i.test(name)) return;
+            try { xhr.setRequestHeader(name, value); } catch { /* Ignore invalid browser headers. */ }
+          });
+        },
+        fetchSetup: (context, initParams) => {
+          const headers = new Headers(initParams.headers);
+          applyHeaders(headers);
+          return new Request(context.url, { ...initParams, headers });
+        },
       });
 
       hlsRef.current = hls;
@@ -134,7 +164,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
         hlsRef.current = null;
       }
     };
-  }, [item.streamUrl, item.type, settings.bufferSizeMB]);
+  }, [item.streamUrl, item.type, item.headers, settings.bufferSizeMB]);
 
   // Sleep timer interval countdown
   useEffect(() => {
