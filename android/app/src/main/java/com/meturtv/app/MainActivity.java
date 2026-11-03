@@ -30,6 +30,7 @@ public class MainActivity extends AppCompatActivity {
 
     private WebView mWebView;
     private WebViewAssetLoader assetLoader;
+    private boolean nativePlayerWasOpened = false;
     private static final int RECORD_AUDIO_PERMISSION_REQUEST = 101;
     private PermissionRequest mCurrentPermissionRequest;
 
@@ -49,6 +50,7 @@ public class MainActivity extends AppCompatActivity {
         mWebView.setBackgroundColor(Color.BLACK);
         mWebView.addJavascriptInterface(new SecureVaultBridge(this), "MeturSecureVault");
         mWebView.addJavascriptInterface(new NativeHttpBridge(mWebView), "MeturNativeHttp");
+        mWebView.addJavascriptInterface(new NativePlayerBridge(this), "MeturNativePlayer");
         setContentView(mWebView);
 
         setupWebView();
@@ -56,6 +58,28 @@ public class MainActivity extends AppCompatActivity {
 
         // Load local bundled dist or remote dev server
         mWebView.loadUrl("https://appassets.androidplatform.net/assets/dist/index.html");
+    }
+
+    /** Called by the JavaScript bridge to launch the isolated native media player. */
+    public void launchNativePlayer(Intent intent) {
+        runOnUiThread(() -> {
+            nativePlayerWasOpened = true;
+            startActivity(intent);
+        });
+    }
+
+    public WebView getWebView() {
+        return mWebView;
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (nativePlayerWasOpened && mWebView != null) {
+            nativePlayerWasOpened = false;
+            mWebView.post(() -> mWebView.evaluateJavascript(
+                    "window.dispatchEvent(new Event('metur-native-player-returned'));", null));
+        }
     }
 
     private void setupWebView() {
