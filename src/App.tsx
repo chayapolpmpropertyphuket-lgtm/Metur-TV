@@ -6,13 +6,7 @@ import {
 } from './types';
 import {
   DEFAULT_TV_SETTINGS,
-  INITIAL_FEATURED_ITEMS,
-  INITIAL_CONTINUE_WATCHING,
-  INITIAL_LIVE_CHANNELS,
-  INITIAL_SERVERS,
-  SAMPLE_W3U_CONTENT,
 } from './data/sampleData';
-import { parseW3U } from './utils/w3uParser';
 import { BackdropAmbient } from './components/BackdropAmbient';
 import { Sidebar, TabType } from './components/Sidebar';
 import { HeroBanner } from './components/HeroBanner';
@@ -25,7 +19,6 @@ import { MediaDetailsModal } from './components/MediaDetailsModal';
 import { ChannelGuide } from './components/ChannelGuide';
 import { VirtualRemote } from './components/VirtualRemote';
 import { VoiceSearch } from './components/VoiceSearch';
-import { ApkBuildModal } from './components/ApkBuildModal';
 import {
   Server,
   ListPlus,
@@ -40,37 +33,26 @@ import {
   Clock,
   Play,
   Moon,
-  Smartphone,
 } from 'lucide-react';
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<TabType>('home');
   const [settings, setSettings] = useState<TVSettings>(DEFAULT_TV_SETTINGS);
-  const [servers, setServers] = useState<MediaServerConfig[]>(INITIAL_SERVERS);
+  const [servers, setServers] = useState<MediaServerConfig[]>([]);
 
   // Media Collections
-  const [featuredItems, setFeaturedItems] = useState<MediaItem[]>(INITIAL_FEATURED_ITEMS);
-  const [continueWatching, setContinueWatching] = useState<MediaItem[]>(INITIAL_CONTINUE_WATCHING);
-  const [liveChannels, setLiveChannels] = useState<MediaItem[]>(INITIAL_LIVE_CHANNELS);
+  const [featuredItems, setFeaturedItems] = useState<MediaItem[]>([]);
+  const [continueWatching, setContinueWatching] = useState<MediaItem[]>([]);
+  const [liveChannels, setLiveChannels] = useState<MediaItem[]>([]);
 
   // Extra W3U imported items
-  const [w3uItems, setW3uItems] = useState<MediaItem[]>(() => {
-    try {
-      const parsed = parseW3U(SAMPLE_W3U_CONTENT, 'Wiseplay 4K Cinema');
-      return parsed.items;
-    } catch {
-      return [];
-    }
-  });
+  const [w3uItems, setW3uItems] = useState<MediaItem[]>([]);
 
   // Watch History
-  const [watchHistory, setWatchHistory] = useState<MediaItem[]>([
-    INITIAL_CONTINUE_WATCHING[0],
-    INITIAL_CONTINUE_WATCHING[1],
-  ]);
+  const [watchHistory, setWatchHistory] = useState<MediaItem[]>([]);
 
   // Active / Focused Item State for 10-ft TV experience
-  const [focusedItem, setFocusedItem] = useState<MediaItem>(INITIAL_FEATURED_ITEMS[0]);
+  const [focusedItem, setFocusedItem] = useState<MediaItem | null>(null);
   const [playingItem, setPlayingItem] = useState<MediaItem | null>(null);
   const [detailsItem, setDetailsItem] = useState<MediaItem | null>(null);
 
@@ -78,7 +60,6 @@ export default function App() {
   const [isServersOpen, setIsServersOpen] = useState(false);
   const [isPlaylistsOpen, setIsPlaylistsOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isApkModalOpen, setIsApkModalOpen] = useState(false);
 
   // Quick search / filter & Voice Search
   const [searchQuery, setSearchQuery] = useState('');
@@ -106,7 +87,7 @@ export default function App() {
     setContinueWatching(updateList);
     setWatchHistory(updateList);
 
-    if (focusedItem.id === targetItem.id) {
+    if (focusedItem?.id === targetItem.id) {
       setFocusedItem({ ...focusedItem, isFavorite: updatedStatus });
     }
     if (detailsItem && detailsItem.id === targetItem.id) {
@@ -374,7 +355,7 @@ export default function App() {
     }
   };
   const handleRemoteSelect = () => {
-    startPlaying(focusedItem);
+    if (focusedItem) startPlaying(focusedItem);
   };
   const handleRemoteBack = () => {
     if (playingItem) setPlayingItem(null);
@@ -397,7 +378,7 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
   const handleRemotePlayPause = () => {
-    if (!playingItem) {
+    if (!playingItem && focusedItem) {
       startPlaying(focusedItem);
     }
   };
@@ -416,11 +397,6 @@ export default function App() {
     setServers((prev) => prev.filter((s) => s.id !== id));
   };
 
-  const handleSyncServer = (id: string) => {
-    setServers((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, lastSync: 'เพิ่งซิงค์ข้อมูลใหม่' } : s))
-    );
-  };
 
   // Navigation tab switch router
   const handleSelectTab = (tab: TabType) => {
@@ -519,14 +495,6 @@ export default function App() {
               <span>เซิร์ฟเวอร์ ({servers.length})</span>
             </button>
 
-            <button
-              onClick={() => setIsApkModalOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-emerald-500/20 to-teal-500/20 hover:from-emerald-500/30 hover:to-teal-500/30 text-emerald-300 text-xs font-semibold backdrop-blur-md transition-all hover:scale-102 border border-emerald-500/30 whitespace-nowrap"
-              title="สร้างไฟล์ APK สำหรับติดตั้งบน Android TV"
-            >
-              <Smartphone className="w-4 h-4" />
-              <span>สร้างไฟล์ APK</span>
-            </button>
 
             <button
               onClick={() => setIsSettingsOpen(true)}
@@ -578,7 +546,7 @@ export default function App() {
             )}
 
             {/* Dynamic Hero Banner */}
-            {!searchQuery && (
+            {!searchQuery && focusedItem && (
               <HeroBanner
                 item={focusedItem}
                 onPlay={(item) => startPlaying(item)}
@@ -952,7 +920,6 @@ export default function App() {
         onClose={() => setIsServersOpen(false)}
         onAddServer={handleAddServer}
         onRemoveServer={handleRemoveServer}
-        onSyncServer={handleSyncServer}
       />
 
       <PlaylistsModal
@@ -969,10 +936,6 @@ export default function App() {
         onUpdateSettings={(newVals) => setSettings({ ...settings, ...newVals })}
       />
 
-      <ApkBuildModal
-        isOpen={isApkModalOpen}
-        onClose={() => setIsApkModalOpen(false)}
-      />
 
       <MediaDetailsModal
         item={detailsItem}
