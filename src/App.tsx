@@ -214,12 +214,14 @@ export default function App() {
 
       if (!active || active === document.body ||
           !active.matches(selector) || !elements.includes(active)) {
-        const initial =
-          document.querySelector<HTMLElement>(
-            `[data-tv-nav="${currentTab}"]`
-          );
+        // When a modal is open, never send the first D-pad press back
+        // to the sidebar behind it. The modal's first enabled control owns focus.
+        const initial = document.querySelector<HTMLElement>('[data-tv-modal="true"]')
+          ? elements[0]
+          : document.querySelector<HTMLElement>(`[data-tv-nav="${currentTab}"]`) || elements[0];
 
-        (initial || elements[0])?.focus();
+        initial?.focus();
+        initial?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
         return;
       }
 
@@ -416,12 +418,14 @@ export default function App() {
     const initialTimer = window.setTimeout(() => {
       if (document.activeElement === document.body ||
           document.activeElement === document.documentElement) {
-        const modal = document.querySelector<HTMLElement>(
-          '.fixed.inset-0 [autofocus], .fixed.inset-0 button:not(:disabled), .fixed.inset-0 input:not(:disabled)'
+        const modalRoot = document.querySelector<HTMLElement>('[data-tv-modal="true"]');
+        const modalTarget = modalRoot?.querySelector<HTMLElement>(
+          'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])'
         );
-        const target = modal ||
+        const target = modalTarget ||
           document.querySelector<HTMLElement>(`[data-tv-nav="${currentTab}"]`);
         target?.focus();
+        target?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
       }
     }, 300);
 
