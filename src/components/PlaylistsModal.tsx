@@ -52,6 +52,62 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
   const [savedPlaylists, setSavedPlaylists] = useState<PlaylistEntry[]>([]);
   const [selectedPlaylist, setSelectedPlaylist] = useState<PlaylistEntry | null>(null);
 
+  const handleImportFromUrl = async (type: 'w3u' | 'm3u') => {
+    const sourceUrl = urlInput.trim();
+    if (!sourceUrl) {
+      setStatusMessage({ text: 'กรุณากรอก URL ของ Playlist', type: 'error' });
+      return;
+    }
+
+    try {
+      const parsedUrl = new URL(sourceUrl);
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+        throw new Error('รองรับเฉพาะ URL แบบ HTTP หรือ HTTPS');
+      }
+
+      setStatusMessage({ text: 'กำลังดาวน์โหลด Playlist จาก URL...', type: 'success' });
+      const response = await fetch(parsedUrl.toString());
+      if (!response.ok) {
+        throw new Error(`ดาวน์โหลดไม่สำเร็จ (HTTP ${response.status})`);
+      }
+
+      const content = await response.text();
+      const nameFromUrl = decodeURIComponent(parsedUrl.pathname.split('/').pop() || 'Remote Playlist');
+      const name = playlistName.trim() || nameFromUrl;
+      const parsed = type === 'w3u'
+        ? parseW3U(content, name)
+        : parseM3U(content, name);
+
+      if (parsed.items.length === 0) {
+        throw new Error('ไม่พบรายการสื่อใน Playlist หรือรูปแบบไฟล์ไม่ตรงกับประเภทที่เลือก');
+      }
+
+      const entry: PlaylistEntry = {
+        id: `pl-${Date.now()}`,
+        name: type === 'w3u' ? parsed.playlist.name : name,
+        type,
+        source: 'url',
+        itemCount: parsed.items.length,
+        groups: parsed.groups,
+        addedAt: 'นำเข้าจาก URL',
+        items: parsed.items,
+      };
+
+      setSavedPlaylists((previous) => [entry, ...previous]);
+      setSelectedPlaylist(entry);
+      onImportItems(parsed.items, entry.name);
+      setUrlInput('');
+      setPlaylistName('');
+      setStatusMessage({ text: `นำเข้า ${type.toUpperCase()} สำเร็จ ${parsed.items.length} รายการ`, type: 'success' });
+      setActiveTab('manage');
+    } catch (error) {
+      const message = error instanceof TypeError
+        ? 'โหลด URL ไม่สำเร็จ อาจเกิดจาก CORS หรือเซิร์ฟเวอร์ไม่อนุญาตให้แอปอ่านไฟล์'
+        : error instanceof Error ? error.message : 'ไม่สามารถนำเข้า Playlist จาก URL ได้';
+      setStatusMessage({ text: message, type: 'error' });
+    }
+  };
+
   if (!isOpen) return null;
 
   const handleImportW3U = () => {
@@ -405,6 +461,20 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
               />
             </div>
 
+            <div className="flex flex-col gap-2 p-3 rounded-xl bg-white/[0.03] border border-white/10">
+              <label className="text-xs font-medium text-slate-300">หรือโหลด W3U จาก URL</label>
+              <input
+                type="url"
+                placeholder="https://example.com/playlist.w3u"
+                value={urlInput}
+                onChange={(e) => setUrlInput(e.target.value)}
+                className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-xs font-mono focus:outline-none focus:border-white"
+              />
+              <button type="button" onClick={() => handleImportFromUrl('w3u')} className="self-end px-4 py-2 rounded-lg bg-white/10 text-white text-xs font-semibold hover:bg-white/15">
+                โหลดและนำเข้า W3U จาก URL
+              </button>
+            </div>
+
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-medium text-slate-400">
                 เนื้อหา JSON ของ W3U (โครงสร้าง groups, stations, url)
@@ -445,6 +515,20 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
                 onChange={(e) => setPlaylistName(e.target.value)}
                 className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-white transition-colors"
               />
+            </div>
+
+            <div className="flex flex-col gap-2 p-3 rounded-xl bg-white/[0.03] border border-white/10">
+              <label className="text-xs font-medium text-slate-300">หรือโหลด M3U / M3U8 จาก URL</label>
+              <input
+                type="url"
+                placeholder="https://example.com/playlist.m3u"
+                value={urlInput}
+                onChange={(e) => setUrlInput(e.target.value)}
+                className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-xs font-mono focus:outline-none focus:border-white"
+              />
+              <button type="button" onClick={() => handleImportFromUrl('m3u')} className="self-end px-4 py-2 rounded-lg bg-white/10 text-white text-xs font-semibold hover:bg-white/15">
+                โหลดและนำเข้า M3U จาก URL
+              </button>
             </div>
 
             <div className="flex flex-col gap-1.5">
