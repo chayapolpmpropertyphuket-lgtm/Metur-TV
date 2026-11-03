@@ -32,7 +32,6 @@ function mapServerItem(raw: Record<string, unknown>, server: MediaServerConfig, 
   if (!id || !title) return null;
   let type: MediaItem['type'];
   if (rawType === 'Movie') type = 'movie';
-  else if (rawType === 'Series') type = 'series';
   else if (rawType === 'Episode') type = 'episode';
   else return null;
 
@@ -129,7 +128,7 @@ export async function connectJellyfinOrEmby(
   }
 
   const itemsResponse = await nativeRequest<ServerItemsResult>(
-    apiUrl(base, `Users/${encodeURIComponent(userId)}/Items?Recursive=true&IncludeItemTypes=Movie,Series,Episode&Fields=Overview,Genres,ProductionYear,RunTimeTicks,ImageTags,BackdropImageTags&SortBy=DateCreated&SortOrder=Descending&Limit=300`),
+    apiUrl(base, `Users/${encodeURIComponent(userId)}/Items?Recursive=true&IncludeItemTypes=Movie,Episode&Fields=Overview,Genres,ProductionYear,RunTimeTicks,ImageTags,BackdropImageTags&SortBy=DateCreated&SortOrder=Descending&Limit=300`),
     'GET',
     { 'X-Emby-Token': accessToken, 'X-Emby-Authorization': clientHeader },
   );
