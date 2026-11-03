@@ -4,11 +4,11 @@ import { MediaItem } from '../types';
  * Robust parser for M3U / M3U8 playlist strings
  * Extracts tvg-name, tvg-logo, tvg-id, group-title, headers, and stream URLs
  */
-export function parseM3U(m3uContent: string, playlistName = 'IPTV List'): {
+export function parseM3U(m3uContent: string, playlistName = 'IPTV List', baseUrl?: string): {
   items: MediaItem[];
   groups: string[];
 } {
-  const lines = m3uContent.split(/\r?\n/);
+  const lines = m3uContent.replace(/^\uFEFF/, '').split(/\r?\n/);
   const items: MediaItem[] = [];
   const groupSet = new Set<string>();
 
@@ -53,7 +53,10 @@ export function parseM3U(m3uContent: string, playlistName = 'IPTV List'): {
       }
     } else if (!line.startsWith('#')) {
       // This is the media URL line
-      const url = line;
+      let url = line;
+      if (baseUrl && !/^[a-z][a-z0-9+.-]*:/i.test(url)) {
+        try { url = new URL(url, baseUrl).toString(); } catch { /* Ignore malformed relative URLs. */ }
+      }
       if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('rtmp://')) {
         groupSet.add(currentGroup);
 
