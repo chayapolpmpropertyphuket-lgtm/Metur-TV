@@ -543,6 +543,10 @@ export default function App() {
             active instanceof HTMLTextAreaElement ||
             active instanceof HTMLSelectElement ||
             (active instanceof HTMLElement && active.isContentEditable)) {
+          // Android WebView may require an explicit click after focus to show
+          // the on-screen keyboard for a TV remote's OK key.
+          active.focus();
+          active.click();
           return;
         }
         const focused = active instanceof HTMLElement ? active : null;
