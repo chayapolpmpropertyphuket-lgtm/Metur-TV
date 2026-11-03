@@ -71,7 +71,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   return (
-    <div data-tv-modal="true" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xl">
+    <div data-tv-modal="true" data-tv-focus-group="modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xl">
       <div className="relative w-full max-w-2xl bg-[#090b10] border border-white/10 rounded-3xl p-6 md:p-8 shadow-2xl flex flex-col gap-6 max-h-[90vh] overflow-y-auto no-scrollbar">
         {/* Header */}
         <div className="flex items-center justify-between pb-4 border-b border-white/5">
