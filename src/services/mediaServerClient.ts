@@ -25,7 +25,7 @@ function parseJson<T>(body: string, message: string): T {
   catch { throw new Error(message); }
 }
 
-function mapServerItem(raw: Record<string, unknown>, server: MediaServerConfig, accessToken: string): MediaItem | null {
+function mapServerItem(raw: Record<string, unknown>, server: MediaServerConfig): MediaItem | null {
   const id = String(raw.Id ?? '');
   const title = String(raw.Name ?? '').trim();
   const rawType = String(raw.Type ?? '');
@@ -35,17 +35,14 @@ function mapServerItem(raw: Record<string, unknown>, server: MediaServerConfig, 
   else if (rawType === 'Episode') type = 'episode';
   else return null;
 
-  const imageBase = apiUrl(server.url, `Items/${encodeURIComponent(id)}/Images`);
+  // Do not put access tokens in image URLs: MediaItems are persisted in IndexedDB
+  // and may also be exported or logged. Authenticated image loading will be
+  // added through the native request bridge; until then keep artwork empty.
   const genres = Array.isArray(raw.Genres) ? raw.Genres.map(String) : [];
   const ticks = Number(raw.RunTimeTicks ?? 0);
   const year = Number(raw.ProductionYear ?? 0);
-  const poster = raw.ImageTags && typeof raw.ImageTags === 'object'
-    && (raw.ImageTags as Record<string, unknown>).Primary
-    ? `${imageBase}/Primary?maxWidth=480&api_key=${encodeURIComponent(accessToken)}`
-    : '';
-  const backdrop = Array.isArray(raw.BackdropImageTags) && raw.BackdropImageTags.length
-    ? `${imageBase}/Backdrop/0?maxWidth=1280&api_key=${encodeURIComponent(accessToken)}`
-    : poster;
+  const poster = '';
+  const backdrop = '';
   return {
     id: `${server.id}:${id}`,
     title,
@@ -137,7 +134,7 @@ export async function connectJellyfinOrEmby(
   }
   const payload = itemsResponse.data ?? parseJson<ServerItemsResult>(itemsResponse.body, 'รายการสื่อจากเซิร์ฟเวอร์ไม่ถูกต้อง');
   const items = (payload.Items ?? [])
-    .map((item) => mapServerItem(item, server, accessToken))
+    .map((item) => mapServerItem(item, server))
     .filter((item): item is MediaItem => item !== null);
 
   await saveServerCredentials(server.id, { username, token: accessToken });
