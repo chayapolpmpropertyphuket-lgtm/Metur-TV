@@ -4,6 +4,17 @@ const DB_NAME = 'metur-tv-local';
 const DB_VERSION = 1;
 const STORE_NAME = 'app-state';
 
+export interface PersistedPlaylist {
+  id: string;
+  name: string;
+  type: 'w3u' | 'm3u';
+  source: 'url' | 'content';
+  itemCount: number;
+  groups: string[];
+  addedAt: string;
+  items: MediaItem[];
+}
+
 export interface PersistedAppState {
   settings: TVSettings;
   servers: Array<Omit<MediaServerConfig, 'username' | 'token'>>;
@@ -40,6 +51,39 @@ export async function loadAppState(): Promise<Partial<PersistedAppState> | null>
       const request = db.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).get('root');
       request.onsuccess = () => resolve(request.result?.value ?? null);
       request.onerror = () => reject(request.error ?? new Error('อ่านข้อมูลในเครื่องไม่สำเร็จ'));
+    });
+  } finally {
+    db.close();
+  }
+}
+
+export async function loadPlaylists(): Promise<PersistedPlaylist[]> {
+  const db = await openDatabase();
+  try {
+    return await new Promise((resolve, reject) => {
+      const request = db.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).get('playlists');
+      request.onsuccess = () => resolve(request.result?.value ?? []);
+      request.onerror = () => reject(request.error ?? new Error('อ่าน Playlist ในเครื่องไม่สำเร็จ'));
+    });
+  } finally {
+    db.close();
+  }
+}
+
+export async function savePlaylists(playlists: PersistedPlaylist[]): Promise<void> {
+  const db = await openDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(STORE_NAME, 'readwrite');
+      transaction.objectStore(STORE_NAME).put({
+        key: 'playlists',
+        schemaVersion: DB_VERSION,
+        updatedAt: Date.now(),
+        value: playlists,
+      });
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error ?? new Error('บันทึก Playlist ไม่สำเร็จ'));
+      transaction.onabort = () => reject(transaction.error ?? new Error('การบันทึก Playlist ถูกยกเลิก'));
     });
   } finally {
     db.close();
