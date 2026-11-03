@@ -21,6 +21,8 @@ export interface MediaItem {
   channelNumber?: string;
   group?: string;
   serverName?: string;
+  serverId?: string;
+  serverItemId?: string;
   headers?: Record<string, string>;
   epgNow?: string;
   epgNext?: string;
