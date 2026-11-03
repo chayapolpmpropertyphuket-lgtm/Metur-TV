@@ -85,6 +85,7 @@ export async function connectJellyfinOrEmby(
   server: MediaServerConfig,
   username: string,
   passwordOrApiToken: string,
+  storedAccessToken = false,
 ): Promise<MediaServerConnectionResult> {
   if (server.type !== 'jellyfin' && server.type !== 'emby') {
     throw new Error('รอบนี้รองรับการเชื่อมต่อจริงเฉพาะ Jellyfin และ Emby');
@@ -94,23 +95,28 @@ export async function connectJellyfinOrEmby(
   let user: AuthResult;
 
   if (passwordOrApiToken) {
-    const auth = await nativeRequest<AuthResult>(
-      apiUrl(base, 'Users/AuthenticateByName'),
-      'POST',
-      { 'X-Emby-Authorization': clientHeader },
-      { Username: username, Pw: passwordOrApiToken },
-    );
-    if (auth.ok) {
-      const data = auth.data ?? parseJson<AuthResult>(auth.body, 'ข้อมูลยืนยันตัวตนไม่ถูกต้อง');
-      accessToken = String(data.AccessToken ?? '');
-      user = data.User ?? {};
+    if (storedAccessToken) {
+      user = await getCurrentUser(server, passwordOrApiToken);
+      accessToken = passwordOrApiToken;
     } else {
-      // If the supplied value is an API token, validate it with /Users/Me.
-      try {
-        user = await getCurrentUser(server, passwordOrApiToken);
-        accessToken = passwordOrApiToken;
-      } catch {
-        throw new Error(`เข้าสู่ระบบไม่สำเร็จ (HTTP ${auth.status}) กรุณาตรวจ Username และ Password หรือ API Token`);
+      const auth = await nativeRequest<AuthResult>(
+        apiUrl(base, 'Users/AuthenticateByName'),
+        'POST',
+        { 'X-Emby-Authorization': clientHeader },
+        { Username: username, Pw: passwordOrApiToken },
+      );
+      if (auth.ok) {
+        const data = auth.data ?? parseJson<AuthResult>(auth.body, 'ข้อมูลยืนยันตัวตนไม่ถูกต้อง');
+        accessToken = String(data.AccessToken ?? '');
+        user = data.User ?? {};
+      } else {
+        // If the supplied value is an API token, validate it with /Users/Me.
+        try {
+          user = await getCurrentUser(server, passwordOrApiToken);
+          accessToken = passwordOrApiToken;
+        } catch {
+          throw new Error(`เข้าสู่ระบบไม่สำเร็จ (HTTP ${auth.status}) กรุณาตรวจ Username และ Password หรือ API Token`);
+        }
       }
     }
   } else {
