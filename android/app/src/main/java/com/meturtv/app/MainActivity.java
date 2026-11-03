@@ -105,21 +105,28 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onPermissionRequest(final PermissionRequest request) {
                 runOnUiThread(() -> {
-                    for (String resource : request.getResources()) {
-                        if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource)) {
-                            if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.RECORD_AUDIO)
-                                    == PackageManager.PERMISSION_GRANTED) {
-                                request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
-                            } else {
-                                mCurrentPermissionRequest = request;
-                                ActivityCompat.requestPermissions(MainActivity.this,
-                                        new String[]{Manifest.permission.RECORD_AUDIO},
-                                        RECORD_AUDIO_PERMISSION_REQUEST);
-                            }
-                            return;
-                        }
+                    Uri requestOrigin = request.getOrigin();
+                    if (requestOrigin == null
+                            || !"https".equals(requestOrigin.getScheme())
+                            || !"appassets.androidplatform.net".equals(requestOrigin.getHost())) {
+                        request.deny();
+                        return;
                     }
-                    request.grant(request.getResources());
+                    String[] requested = request.getResources();
+                    if (requested.length != 1
+                            || !PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(requested[0])) {
+                        request.deny();
+                        return;
+                    }
+                    if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.RECORD_AUDIO)
+                            == PackageManager.PERMISSION_GRANTED) {
+                        request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
+                    } else {
+                        mCurrentPermissionRequest = request;
+                        ActivityCompat.requestPermissions(MainActivity.this,
+                                new String[]{Manifest.permission.RECORD_AUDIO},
+                                RECORD_AUDIO_PERMISSION_REQUEST);
+                    }
                 });
             }
         });
@@ -138,11 +145,13 @@ public class MainActivity extends AppCompatActivity {
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == RECORD_AUDIO_PERMISSION_REQUEST) {
-            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                if (mCurrentPermissionRequest != null) {
+            if (mCurrentPermissionRequest != null) {
+                if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                     mCurrentPermissionRequest.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
-                    mCurrentPermissionRequest = null;
+                } else {
+                    mCurrentPermissionRequest.deny();
                 }
+                mCurrentPermissionRequest = null;
             }
         }
     }
