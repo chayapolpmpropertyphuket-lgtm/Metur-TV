@@ -417,16 +417,56 @@ export default function App() {
         e.preventDefault();
         e.stopPropagation();
         const step = e.repeat ? 30 : 42;
+        const movingDown = e.key === 'ArrowDown';
+        const movingUp = e.key === 'ArrowUp';
+        const nextY = remoteCursor.y + (movingDown ? step : movingUp ? -step : 0);
+        const edge = 28;
+
+        // When the pointer reaches the top/bottom edge, scroll the nearest
+        // scrollable panel (modal/forms first), then keep the pointer visible.
+        if ((movingDown && nextY >= window.innerHeight - edge) ||
+            (movingUp && nextY <= edge)) {
+          const targetAtCursor = document.elementFromPoint(remoteCursor.x, remoteCursor.y) as HTMLElement | null;
+          let scrollParent: HTMLElement | null = targetAtCursor;
+          while (scrollParent && scrollParent !== document.body) {
+            const style = window.getComputedStyle(scrollParent);
+            const canScroll = /(auto|scroll|overlay)/.test(style.overflowY) &&
+              scrollParent.scrollHeight > scrollParent.clientHeight + 2;
+            if (canScroll) break;
+            scrollParent = scrollParent.parentElement;
+          }
+
+          const delta = movingDown ? 220 : -220;
+          if (scrollParent && scrollParent !== document.body) {
+            scrollParent.scrollBy({ top: delta, behavior: 'smooth' });
+          } else {
+            window.scrollBy({ top: delta, behavior: 'smooth' });
+            const root = document.scrollingElement;
+            if (root && root.scrollHeight <= root.clientHeight + 2) {
+              const fallback = targetAtCursor?.closest<HTMLElement>('[data-tv-modal="true"]')
+                ?.querySelector<HTMLElement>('[class*="overflow-y-auto"], [class*="overflow-auto"]');
+              fallback?.scrollBy({ top: delta, behavior: 'smooth' });
+            }
+          }
+
+          setRemoteCursor((point) => ({
+            ...point,
+            y: movingDown ? Math.max(40, window.innerHeight - 90) : 90,
+          }));
+          return;
+        }
+
         setRemoteCursor((point) => ({
           x: Math.max(8, Math.min(window.innerWidth - 8,
             point.x + (e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0))),
           y: Math.max(8, Math.min(window.innerHeight - 8,
-            point.y + (e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0))),
+            point.y + (movingUp ? -step : movingDown ? step : 0))),
         }));
         return;
       }
 
-      // OK clicks the element directly beneath the software cursor.
+      // OK focuses form controls explicitly so Android WebView can open its
+      // soft keyboard; clicking a surrounding label/container is not enough.
       if (e.key === 'Enter' || e.key === ' ') {
         const editing = active instanceof HTMLInputElement ||
           active instanceof HTMLTextAreaElement ||
@@ -435,9 +475,21 @@ export default function App() {
         if (editing) return;
         e.preventDefault();
         e.stopPropagation();
+
         const target = document.elementFromPoint(remoteCursor.x, remoteCursor.y) as HTMLElement | null;
+        const control = target?.matches('input:not(:disabled), textarea:not(:disabled), select:not(:disabled)')
+          ? target
+          : target?.closest<HTMLElement>('input:not(:disabled), textarea:not(:disabled), select:not(:disabled)') ||
+            (target?.closest('label') as HTMLLabelElement | null)?.control as HTMLElement | null;
+
+        if (control && !control.matches('input[type="hidden"]')) {
+          control.focus();
+          control.click();
+          return;
+        }
+
         const clickable = target?.closest<HTMLElement>(
-          'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [role="button"], [onclick], [tabindex]:not([tabindex="-1"])'
+          'button:not(:disabled), a[href], [role="button"], [onclick], [tabindex]:not([tabindex="-1"])'
         ) || target;
         clickable?.click();
         return;
