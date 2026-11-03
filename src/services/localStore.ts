@@ -35,7 +35,11 @@ type StoredMediaItem = Omit<MediaItem, 'streamUrl' | 'headers'> & {
   secureRef?: string;
 };
 
-type StoredPlaylist = Omit<PersistedPlaylist, 'items'> & { items: StoredMediaItem[] };
+type StoredPlaylist = Omit<PersistedPlaylist, 'items' | 'sourceUrl'> & {
+  items: StoredMediaItem[];
+  sourceUrl?: string;
+  sourceSecureRef?: string;
+};
 type StoredAppState = Omit<PersistedAppState,
   'w3uItems' | 'continueWatching' | 'liveChannels' | 'featuredItems' | 'watchHistory'> & {
     w3uItems: StoredMediaItem[];
@@ -140,6 +144,42 @@ async function deserializeItems(items: StoredMediaItem[]): Promise<MediaItem[]> 
   }));
 }
 
+async function serializePlaylist(playlist: PersistedPlaylist): Promise<StoredPlaylist> {
+  const { sourceUrl, ...safePlaylist } = playlist;
+  const stored: StoredPlaylist = {
+    ...safePlaylist,
+    items: await serializeItems(`playlist-${playlist.id}`, playlist.items),
+  };
+  if (sourceUrl) {
+    const sourceSecureRef = makeSecureRef(`playlist-url-${playlist.id}`, 0);
+    await putSecureValue(sourceSecureRef, JSON.stringify({ sourceUrl }));
+    stored.sourceSecureRef = sourceSecureRef;
+  }
+  return stored;
+}
+
+async function deserializePlaylist(playlist: StoredPlaylist): Promise<PersistedPlaylist> {
+  const { sourceSecureRef, ...safePlaylist } = playlist;
+  let sourceUrl = playlist.sourceUrl;
+  if (sourceSecureRef) {
+    const payload = await getSecureValue(sourceSecureRef);
+    if (payload) {
+      try {
+        sourceUrl = (JSON.parse(payload) as { sourceUrl?: string }).sourceUrl;
+      } catch {
+        sourceUrl = undefined;
+      }
+    } else {
+      sourceUrl = undefined;
+    }
+  }
+  return {
+    ...safePlaylist,
+    ...(sourceUrl ? { sourceUrl } : {}),
+    items: await deserializeItems(playlist.items ?? []),
+  };
+}
+
 function collectSecureRefs(value: unknown): Set<string> {
   const refs = new Set<string>();
   const visit = (candidate: unknown): void => {
@@ -150,6 +190,7 @@ function collectSecureRefs(value: unknown): Set<string> {
     if (!candidate || typeof candidate !== 'object') return;
     const record = candidate as Record<string, unknown>;
     if (typeof record.secureRef === 'string') refs.add(record.secureRef);
+    if (typeof record.sourceSecureRef === 'string') refs.add(record.sourceSecureRef);
     Object.values(record).forEach(visit);
   };
   visit(value);
@@ -166,6 +207,7 @@ function hasLegacySensitiveItems(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(hasLegacySensitiveItems);
   if (!value || typeof value !== 'object') return false;
   const record = value as Record<string, unknown>;
+  if (typeof record.sourceUrl === 'string' && !record.sourceSecureRef) return true;
   if (typeof record.streamUrl === 'string' && !record.secureRef) {
     const item = record as unknown as MediaItem;
     if (hasSensitiveStreamData(item)) return true;
@@ -217,15 +259,9 @@ export async function loadPlaylists(): Promise<PersistedPlaylist[]> {
   const db = await openDatabase();
   try {
     const stored = await readRecord<StoredPlaylist[]>(db, 'playlists') ?? [];
-    const restored = await Promise.all(stored.map(async (playlist) => ({
-      ...playlist,
-      items: await deserializeItems(playlist.items ?? []),
-    })));
+    const restored = await Promise.all(stored.map(deserializePlaylist));
     if (hasLegacySensitiveItems(stored)) {
-      const migrated = await Promise.all(restored.map(async (playlist) => ({
-        ...playlist,
-        items: await serializeItems(`playlist-${playlist.id}`, playlist.items),
-      })));
+      const migrated = await Promise.all(restored.map(serializePlaylist));
       await writeRecord(db, 'playlists', migrated);
       await removeStaleSecureValues(stored, migrated);
     }
@@ -247,10 +283,7 @@ export function savePlaylists(playlists: PersistedPlaylist[]): Promise<void> {
     const db = await openDatabase();
     try {
       const previous = await readRecord<StoredPlaylist[]>(db, 'playlists') ?? [];
-      const stored = await Promise.all(snapshot.map(async (playlist) => ({
-        ...playlist,
-        items: await serializeItems(`playlist-${playlist.id}`, playlist.items),
-      })));
+      const stored = await Promise.all(snapshot.map(serializePlaylist));
       await writeRecord(db, 'playlists', stored);
       await removeStaleSecureValues(previous, stored);
     } finally {
