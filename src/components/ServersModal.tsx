@@ -177,6 +177,8 @@ export const ServersModal: React.FC<ServersModalProps> = ({
                         <span className="font-mono">{srv.url}</span>
                         <span aria-hidden="true">·</span>
                         <span>{srv.itemCount.toLocaleString()} สื่อที่ซิงค์</span>
+                        <span aria-hidden="true">·</span>
+                        <span>{srv.status === 'connected' ? 'เชื่อมต่อแล้ว' : 'ยังไม่ได้ทดสอบการเชื่อมต่อ'}</span>
                       </div>
                     </div>
                   </div>
