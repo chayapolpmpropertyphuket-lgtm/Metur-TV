@@ -73,8 +73,7 @@ export default function App() {
   // Quick Channel Number Tuning overlay feedback
   const [quickTuneNumber, setQuickTuneNumber] = useState<string | null>(null);
 
-  // Load local-only app data once. Server credentials are deliberately excluded
-  // until the Android Keystore bridge is available.
+  // Load persisted app metadata. Server credentials remain in Android Keystore.
   useEffect(() => {
     let active = true;
     loadAppState()
@@ -712,7 +711,7 @@ export default function App() {
             <MediaShelf
               title={settings.language === 'th' ? 'ภาพยนตร์และซีรีส์เด่น' : 'Featured Media'}
               subtitle="Dolby Vision · Atmos · Ultra HD"
-              items={filterMediaList(featuredItems)}
+              items={filterMediaList([...featuredItems, ...serverItems])}
               aspectRatio="poster"
               focusedItemId={focusedItem?.id}
               onSelect={(item) => startPlaying(item)}
