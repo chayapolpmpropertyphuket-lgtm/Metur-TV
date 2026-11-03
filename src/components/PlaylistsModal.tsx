@@ -10,6 +10,9 @@ import {
   FileCode,
   Download,
   Trash2,
+  Pencil,
+  Check,
+  RotateCw,
   CheckCircle,
   AlertTriangle,
   Play,
@@ -44,6 +47,9 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
   // Start empty; users add their own playlist sources.
   const [savedPlaylists, setSavedPlaylists] = useState<PlaylistEntry[]>([]);
   const [playlistsReady, setPlaylistsReady] = useState(false);
+  const [renamingPlaylistId, setRenamingPlaylistId] = useState<string | null>(null);
+  const [renamingName, setRenamingName] = useState('');
+  const [refreshingPlaylistId, setRefreshingPlaylistId] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -170,6 +176,7 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
         name,
         type,
         source: 'url',
+        sourceUrl: parsedUrl.toString(),
         itemCount: parsed.items.length,
         groups: parsed.groups,
         addedAt: 'นำเข้าจาก URL',
@@ -262,6 +269,81 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
       }, 1200);
     } catch (e: any) {
       setStatusMessage({ text: 'ไม่สามารถแปลผล M3U ได้', type: 'error' });
+    }
+  };
+
+  const handleSavePlaylistName = (id: string) => {
+    const nextName = renamingName.trim();
+    if (!nextName) {
+      setStatusMessage({ text: 'กรุณาระบุชื่อเพลย์ลิสต์', type: 'error' });
+      return;
+    }
+    setSavedPlaylists((previous) => previous.map((playlist) =>
+      playlist.id === id ? { ...playlist, name: nextName } : playlist
+    ));
+    setSelectedPlaylist((previous) => previous?.id === id
+      ? { ...previous, name: nextName }
+      : previous);
+    setRenamingPlaylistId(null);
+    setRenamingName('');
+    setStatusMessage({ text: 'เปลี่ยนชื่อเพลย์ลิสต์แล้ว', type: 'success' });
+  };
+
+  const handleRefreshPlaylist = async (playlist: PlaylistEntry) => {
+    if (!playlist.sourceUrl) {
+      setStatusMessage({ text: 'เพลย์ลิสต์นี้มาจากไฟล์ในเครื่อง จึงไม่มี URL สำหรับอัปเดต', type: 'error' });
+      return;
+    }
+    if (refreshingPlaylistId) return;
+    setRefreshingPlaylistId(playlist.id);
+    setStatusMessage({ text: 'กำลังอัปเดตเพลย์ลิสต์จาก URL...', type: 'success' });
+    try {
+      const parsedUrl = new URL(playlist.sourceUrl);
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+        throw new Error('URL ของเพลย์ลิสต์ไม่ถูกต้อง');
+      }
+      const response = await nativeRequest(
+        parsedUrl.toString(),
+        'GET',
+        { Accept: 'application/x-mpegURL, application/vnd.apple.mpegurl, text/plain, application/json, */*' },
+        undefined,
+        { allowRedirects: true },
+      );
+      if (!response.ok) {
+        throw new Error(response.status > 0
+          ? `อัปเดตไม่สำเร็จ (HTTP ${response.status})`
+          : response.error || 'ไม่สามารถเชื่อมต่อ URL ได้');
+      }
+      const content = response.body;
+      if (!content.trim() || /^\s*<(?:!doctype\s+html|html|head|body)\b/i.test(content)) {
+        throw new Error('URL ไม่ได้ส่งข้อมูล Playlist ที่ถูกต้องกลับมา');
+      }
+      const parsed = playlist.type === 'w3u'
+        ? parseW3U(content, playlist.name, parsedUrl.toString())
+        : parseM3U(content, playlist.name, parsedUrl.toString());
+      if (parsed.items.length === 0) {
+        throw new Error('ไม่พบรายการสื่อใหม่ จึงเก็บข้อมูลเดิมไว้เพื่อป้องกันข้อมูลสูญหาย');
+      }
+      const updated: PlaylistEntry = {
+        ...playlist,
+        itemCount: parsed.items.length,
+        groups: parsed.groups,
+        addedAt: `อัปเดตล่าสุด ${new Date().toLocaleString()}`,
+        items: parsed.items,
+      };
+      setSavedPlaylists((previous) => previous.map((entry) =>
+        entry.id === playlist.id ? updated : entry
+      ));
+      setSelectedPlaylist((previous) => previous?.id === playlist.id ? updated : previous);
+      onImportItems(parsed.items, updated.name);
+      setStatusMessage({ text: `อัปเดตสำเร็จ พบ ${parsed.items.length} รายการ`, type: 'success' });
+    } catch (error) {
+      setStatusMessage({
+        text: error instanceof Error ? error.message : 'อัปเดต Playlist ไม่สำเร็จ',
+        type: 'error',
+      });
+    } finally {
+      setRefreshingPlaylistId(null);
     }
   };
 
@@ -439,14 +521,33 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
                           <Tv className="w-4 h-4 text-purple-400" />
                         )}
                       </div>
-                      <div className="flex flex-col overflow-hidden">
-                        <span className="text-xs font-semibold text-white truncate">
-                          {pl.name}
-                        </span>
+                      <div className="flex flex-col overflow-hidden flex-1">
+                        {renamingPlaylistId === pl.id ? (
+                          <input
+                            autoFocus
+                            value={renamingName}
+                            aria-label="ชื่อเพลย์ลิสต์ใหม่"
+                            onChange={(event) => setRenamingName(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                handleSavePlaylistName(pl.id);
+                              }
+                              if (event.key === 'Escape') {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                setRenamingPlaylistId(null);
+                              }
+                            }}
+                            onClick={(event) => event.stopPropagation()}
+                            className="w-full min-w-0 px-2 py-1 rounded-lg bg-black/40 border border-cyan-400/50 text-white text-xs focus:outline-none"
+                          />
+                        ) : (
+                          <span className="text-xs font-semibold text-white truncate">{pl.name}</span>
+                        )}
                         <div className="flex items-center gap-1.5 text-[11px] text-slate-400 mt-0.5">
-                          <span className="uppercase text-slate-300 font-medium">
-                            {pl.type}
-                          </span>
+                          <span className="uppercase text-slate-300 font-medium">{pl.type}</span>
                           <span aria-hidden="true">·</span>
                           <span>{pl.itemCount} รายการ</span>
                           <span aria-hidden="true">·</span>
@@ -455,13 +556,39 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
                       </div>
                     </div>
 
-                    <button
-                      onClick={(e) => handleDeletePlaylist(pl.id, e)}
-                      className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
-                      title="ลบเพลย์ลิสต์"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {renamingPlaylistId === pl.id ? (
+                        <>
+                          <button
+                            onClick={(event) => { event.stopPropagation(); handleSavePlaylistName(pl.id); }}
+                            className="p-1.5 rounded-lg text-emerald-300 hover:bg-emerald-500/10"
+                            aria-label="บันทึกชื่อเพลย์ลิสต์"
+                          ><Check className="w-3.5 h-3.5" /></button>
+                          <button
+                            onClick={(event) => { event.stopPropagation(); setRenamingPlaylistId(null); }}
+                            className="p-1.5 rounded-lg text-slate-400 hover:bg-white/10"
+                            aria-label="ยกเลิกเปลี่ยนชื่อ"
+                          ><X className="w-3.5 h-3.5" /></button>
+                        </>
+                      ) : (
+                        <button
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setRenamingPlaylistId(pl.id);
+                            setRenamingName(pl.name);
+                          }}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-300 hover:bg-cyan-500/10"
+                          title="เปลี่ยนชื่อเพลย์ลิสต์"
+                          aria-label="เปลี่ยนชื่อเพลย์ลิสต์"
+                        ><Pencil className="w-3.5 h-3.5" /></button>
+                      )}
+                      <button
+                        onClick={(event) => handleDeletePlaylist(pl.id, event)}
+                        className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                        title="ลบเพลย์ลิสต์"
+                        aria-label="ลบเพลย์ลิสต์"
+                      ><Trash2 className="w-3.5 h-3.5" /></button>
+                    </div>
                   </div>
                 );
               })}
@@ -481,8 +608,19 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
+                      {selectedPlaylist.source === 'url' && selectedPlaylist.sourceUrl && (
+                        <button
+                          onClick={() => void handleRefreshPlaylist(selectedPlaylist)}
+                          disabled={refreshingPlaylistId !== null}
+                          className="px-2.5 py-1 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-200 disabled:opacity-40 text-xs flex items-center gap-1 border border-cyan-400/20"
+                          title="อัปเดต Playlist จาก URL"
+                        >
+                          <RotateCw className={`w-3.5 h-3.5 ${refreshingPlaylistId === selectedPlaylist.id ? 'animate-spin' : ''}`} />
+                          <span>อัปเดต</span>
+                        </button>
+                      )}
                       <button
-                        onClick={() => handleExportPlaylist(selectedPlaylist)}
+                        onClick={() => handleExportPlaylist(selectedPlaylist)
                         className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white text-xs flex items-center gap-1 border border-white/5 transition-colors"
                         title="ส่งออกเพลย์ลิสต์นี้เป็นไฟล์"
                       >

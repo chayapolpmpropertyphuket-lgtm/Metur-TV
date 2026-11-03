@@ -5,12 +5,14 @@ const DB_NAME = 'metur-tv-local';
 const DB_VERSION = 1;
 const STORE_NAME = 'app-state';
 let secureWriteSequence = 0;
+let playlistSaveQueue: Promise<void> = Promise.resolve();
 
 export interface PersistedPlaylist {
   id: string;
   name: string;
   type: 'w3u' | 'm3u';
   source: 'url' | 'content';
+  sourceUrl?: string;
   itemCount: number;
   groups: string[];
   addedAt: string;
@@ -233,19 +235,30 @@ export async function loadPlaylists(): Promise<PersistedPlaylist[]> {
   }
 }
 
-export async function savePlaylists(playlists: PersistedPlaylist[]): Promise<void> {
-  const db = await openDatabase();
-  try {
-    const previous = await readRecord<StoredPlaylist[]>(db, 'playlists') ?? [];
-    const stored = await Promise.all(playlists.map(async (playlist) => ({
-      ...playlist,
-      items: await serializeItems(`playlist-${playlist.id}`, playlist.items),
-    })));
-    await writeRecord(db, 'playlists', stored);
-    await removeStaleSecureValues(previous, stored);
-  } finally {
-    db.close();
-  }
+export function savePlaylists(playlists: PersistedPlaylist[]): Promise<void> {
+  // Serialize playlist writes so overlapping React effects cannot commit out of order
+  // or delete secure stream references that a newer snapshot still needs.
+  const snapshot = playlists.map((playlist) => ({
+    ...playlist,
+    groups: [...playlist.groups],
+    items: playlist.items.map((item) => ({ ...item, headers: item.headers ? { ...item.headers } : undefined })),
+  }));
+  const saveTask = playlistSaveQueue.catch(() => undefined).then(async () => {
+    const db = await openDatabase();
+    try {
+      const previous = await readRecord<StoredPlaylist[]>(db, 'playlists') ?? [];
+      const stored = await Promise.all(snapshot.map(async (playlist) => ({
+        ...playlist,
+        items: await serializeItems(`playlist-${playlist.id}`, playlist.items),
+      })));
+      await writeRecord(db, 'playlists', stored);
+      await removeStaleSecureValues(previous, stored);
+    } finally {
+      db.close();
+    }
+  });
+  playlistSaveQueue = saveTask;
+  return saveTask;
 }
 
 export async function saveAppState(state: PersistedAppState): Promise<void> {
