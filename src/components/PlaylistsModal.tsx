@@ -3,6 +3,7 @@ import { MediaItem } from '../types';
 import { parseW3U } from '../utils/w3uParser';
 import { parseM3U } from '../utils/m3uParser';
 import { loadPlaylists, savePlaylists, PersistedPlaylist } from '../services/localStore';
+import { nativeRequest } from '../services/nativeHttp';
 import {
   ListPlus,
   Tv,
@@ -73,13 +74,26 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
       }
 
       setStatusMessage({ text: 'กำลังดาวน์โหลด Playlist จาก URL...', type: 'success' });
-      const response = await fetch(parsedUrl.toString());
+      // Fetch through Android's native HTTP bridge to avoid WebView CORS restrictions.
+      // Redirects are enabled only for public playlist downloads; authenticated server
+      // requests keep redirects disabled so credentials are never forwarded unexpectedly.
+      const response = await nativeRequest(
+        parsedUrl.toString(),
+        'GET',
+        { Accept: 'application/x-mpegURL, application/vnd.apple.mpegurl, text/plain, application/json, */*' },
+        undefined,
+        { allowRedirects: true },
+      );
       if (!response.ok) {
-        throw new Error(`ดาวน์โหลดไม่สำเร็จ (HTTP ${response.status})`);
+        throw new Error(response.status > 0
+          ? `ดาวน์โหลดไม่สำเร็จ (HTTP ${response.status})`
+          : response.error || 'ไม่สามารถเชื่อมต่อ URL ได้');
       }
 
-      const content = await response.text();
-      const nameFromUrl = decodeURIComponent(parsedUrl.pathname.split('/').pop() || 'Remote Playlist');
+      const content = response.body;
+      if (!content.trim()) throw new Error('เซิร์ฟเวอร์ตอบกลับเป็นไฟล์ว่าง');
+      let nameFromUrl = parsedUrl.pathname.split('/').pop() || 'Remote Playlist';
+      try { nameFromUrl = decodeURIComponent(nameFromUrl); } catch { /* Keep the encoded filename. */ }
       const name = playlistName.trim() || nameFromUrl;
       const parsed = type === 'w3u'
         ? parseW3U(content, name)
@@ -108,9 +122,9 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
       setStatusMessage({ text: `นำเข้า ${type.toUpperCase()} สำเร็จ ${parsed.items.length} รายการ`, type: 'success' });
       setActiveTab('manage');
     } catch (error) {
-      const message = error instanceof TypeError
-        ? 'โหลด URL ไม่สำเร็จ อาจเกิดจาก CORS หรือเซิร์ฟเวอร์ไม่อนุญาตให้แอปอ่านไฟล์'
-        : error instanceof Error ? error.message : 'ไม่สามารถนำเข้า Playlist จาก URL ได้';
+      const message = error instanceof Error
+        ? error.message
+        : 'ไม่สามารถนำเข้า Playlist จาก URL ได้';
       setStatusMessage({ text: message, type: 'error' });
     }
   };
