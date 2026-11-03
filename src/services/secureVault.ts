@@ -17,6 +17,33 @@ function bridge(): NativeVaultBridge {
   return window.MeturSecureVault;
 }
 
+export async function putSecureValue(key: string, value: string): Promise<void> {
+  if (!/^[A-Za-z0-9._:-]{1,160}$/.test(key)) {
+    throw new Error('รหัสข้อมูลที่เข้ารหัสไม่ถูกต้อง');
+  }
+  const result = bridge().putSecret(key, value);
+  if (result !== 'OK') {
+    throw new Error('ไม่สามารถเข้ารหัสและบันทึกข้อมูลสตรีมบน Android Keystore ได้');
+  }
+}
+
+export async function getSecureValue(key: string): Promise<string | null> {
+  if (!/^[A-Za-z0-9._:-]{1,160}$/.test(key)) {
+    throw new Error('รหัสข้อมูลที่เข้ารหัสไม่ถูกต้อง');
+  }
+  return bridge().getSecret(key);
+}
+
+export async function deleteSecureValue(key: string): Promise<void> {
+  if (!/^[A-Za-z0-9._:-]{1,160}$/.test(key)) {
+    throw new Error('รหัสข้อมูลที่เข้ารหัสไม่ถูกต้อง');
+  }
+  const result = bridge().deleteSecret(key);
+  if (result !== 'OK') {
+    throw new Error('ไม่สามารถลบข้อมูลสตรีมจากคลังเข้ารหัสได้');
+  }
+}
+
 function credentialKey(serverId: string, field: 'username' | 'token'): string {
   if (!/^[A-Za-z0-9._-]{1,120}$/.test(serverId)) {
     throw new Error('รหัสเซิร์ฟเวอร์ไม่ถูกต้อง');
