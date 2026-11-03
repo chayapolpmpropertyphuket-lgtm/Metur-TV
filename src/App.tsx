@@ -73,6 +73,9 @@ export default function App() {
   // Quick Channel Number Tuning overlay feedback
   const [quickTuneNumber, setQuickTuneNumber] = useState<string | null>(null);
 
+  // Software cursor controlled by a standard Android TV D-pad remote.
+  const [remoteCursor, setRemoteCursor] = useState({ x: 640, y: 360 });
+
   // Load persisted app metadata. Server credentials remain in Android Keystore.
   useEffect(() => {
     let active = true;
@@ -375,38 +378,42 @@ export default function App() {
         return;
       }
 
-      // Four-direction navigation
+      // D-pad moves the on-screen cursor. Keep native text editing intact.
       if (
-        e.key === 'ArrowUp' ||
-        e.key === 'ArrowDown' ||
-        e.key === 'ArrowLeft' ||
-        e.key === 'ArrowRight'
+        e.key === 'ArrowUp' || e.key === 'ArrowDown' ||
+        e.key === 'ArrowLeft' || e.key === 'ArrowRight'
       ) {
+        const editing = active instanceof HTMLInputElement ||
+          active instanceof HTMLTextAreaElement ||
+          active instanceof HTMLSelectElement ||
+          (active instanceof HTMLElement && active.isContentEditable);
+        if (editing) return;
         e.preventDefault();
-        moveFocus(e.key);
+        e.stopPropagation();
+        const step = e.repeat ? 30 : 42;
+        setRemoteCursor((point) => ({
+          x: Math.max(8, Math.min(window.innerWidth - 8,
+            point.x + (e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0))),
+          y: Math.max(8, Math.min(window.innerHeight - 8,
+            point.y + (e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0))),
+        }));
         return;
       }
 
-      // Select focused element
+      // OK clicks the element directly beneath the software cursor.
       if (e.key === 'Enter' || e.key === ' ') {
+        const editing = active instanceof HTMLInputElement ||
+          active instanceof HTMLTextAreaElement ||
+          active instanceof HTMLSelectElement ||
+          (active instanceof HTMLElement && active.isContentEditable);
+        if (editing) return;
         e.preventDefault();
-
-        const focused = document.activeElement as HTMLElement;
-
-        if (
-          focused &&
-          focused !== document.body &&
-          focused.matches(selector)
-        ) {
-          focused.click();
-        } else {
-          document
-            .querySelector<HTMLElement>(
-              `[data-tv-nav="${currentTab}"]`
-            )
-            ?.focus();
-        }
-
+        e.stopPropagation();
+        const target = document.elementFromPoint(remoteCursor.x, remoteCursor.y) as HTMLElement | null;
+        const clickable = target?.closest<HTMLElement>(
+          'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [role="button"], [onclick], [tabindex]:not([tabindex="-1"])'
+        ) || target;
+        clickable?.click();
         return;
       }
 
@@ -443,7 +450,8 @@ export default function App() {
     detailsItem,
     liveChannels,
     settings.quickChannelTuning,
-    currentTab
+    currentTab,
+    remoteCursor
   ]);
 
 
@@ -1092,6 +1100,27 @@ export default function App() {
         onPlay={(item) => startPlaying(item)}
         onToggleFavorite={handleToggleFavorite}
       />
+
+      {/* Software cursor for standard D-pad remotes */}
+      <div
+        aria-hidden="true"
+        style={{
+          position: 'fixed',
+          left: remoteCursor.x,
+          top: remoteCursor.y,
+          zIndex: 99999,
+          width: 24,
+          height: 30,
+          pointerEvents: 'none',
+          transform: 'translate(-2px, -2px)',
+          filter: 'drop-shadow(0 1px 3px rgba(0,0,0,.95))',
+        }}
+      >
+        <svg width="24" height="30" viewBox="0 0 24 30">
+          <path d="M2 1 L2 23 L7.5 17.5 L12 27 L16 25 L11.5 15.5 L20 15 Z"
+            fill="#ffffff" stroke="#111827" strokeWidth="1.8" strokeLinejoin="round" />
+        </svg>
+      </div>
 
       {/* 6. Virtual Remote Controller for testing Android TV D-Pad directly */}
       <VirtualRemote
