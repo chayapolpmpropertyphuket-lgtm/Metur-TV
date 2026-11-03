@@ -28,17 +28,17 @@ public final class NativeHttpBridge {
     }
 
     @JavascriptInterface
-    public void request(String requestId, String urlText, String method, String headersJson, String body) {
+    public void request(String requestId, String urlText, String method, String headersJson, String body, boolean allowRedirects) {
         if (requestId == null || !requestId.matches("[A-Za-z0-9_-]{1,80}")) return;
         executor.execute(() -> {
-            String result = performRequest(urlText, method, headersJson, body);
+            String result = performRequest(urlText, method, headersJson, body, allowRedirects);
             String script = "window.__meturHttpResolve && window.__meturHttpResolve("
                     + JSONObject.quote(requestId) + "," + JSONObject.quote(result) + ");";
             webView.post(() -> webView.evaluateJavascript(script, null));
         });
     }
 
-    private String performRequest(String urlText, String method, String headersJson, String body) {
+    private String performRequest(String urlText, String method, String headersJson, String body, boolean allowRedirects) {
         HttpURLConnection connection = null;
         try {
             URL url = new URL(urlText);
@@ -57,7 +57,9 @@ public final class NativeHttpBridge {
             connection.setRequestMethod(verb);
             connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
             connection.setReadTimeout(READ_TIMEOUT_MS);
-            connection.setInstanceFollowRedirects(false);
+            // Redirects are opt-in. Playlist downloads may use public redirect/CDN URLs;
+            // authenticated API calls keep redirects disabled to avoid forwarding credentials.
+            connection.setInstanceFollowRedirects(allowRedirects);
             connection.setUseCaches(false);
             connection.setRequestProperty("Accept", "application/json, application/xml, text/xml, */*");
             connection.setRequestProperty("User-Agent", "Metur-TV/1.0 Android");
