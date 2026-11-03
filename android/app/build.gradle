@@ -42,7 +42,7 @@ dependencies {
     implementation 'com.google.android.material:material:1.11.0'
     implementation 'androidx.webkit:webkit:1.10.0'
 
-    // Native authenticated streaming (HLS, DASH and progressive HTTP media)
+    // Native authenticated streaming (HLS and progressive HTTP media)
     def media3Version = '1.4.1'
     implementation "androidx.media3:media3-exoplayer:${media3Version}"
     implementation "androidx.media3:media3-exoplayer-hls:${media3Version}"
