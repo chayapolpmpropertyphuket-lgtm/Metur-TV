@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { MediaItem } from '../types';
 import { parseW3U } from '../utils/w3uParser';
 import { parseM3U } from '../utils/m3uParser';
-import { SAMPLE_W3U_CONTENT, SAMPLE_M3U_CONTENT } from '../data/sampleData';
 import {
   ListPlus,
   Tv,
@@ -49,43 +48,16 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
   const [directStreamTitle, setDirectStreamTitle] = useState('');
   const [statusMessage, setStatusMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
-  // Pre-loaded playlists storage
-  const [savedPlaylists, setSavedPlaylists] = useState<PlaylistEntry[]>(() => {
-    // Initial parsed samples
-    const w3uInitial = parseW3U(SAMPLE_W3U_CONTENT, 'Wiseplay Official W3U');
-    const m3uInitial = parseM3U(SAMPLE_M3U_CONTENT, 'IPTV Channels Global');
-
-    return [
-      {
-        id: 'pl-w3u-default',
-        name: 'Lenna Thai & Global Wiseplay W3U',
-        type: 'w3u',
-        source: 'content',
-        itemCount: w3uInitial.items.length,
-        groups: w3uInitial.groups,
-        addedAt: 'ระบบติดตั้งเริ่มต้น',
-        items: w3uInitial.items,
-      },
-      {
-        id: 'pl-m3u-default',
-        name: 'IPTV Live Streams M3U8',
-        type: 'm3u',
-        source: 'content',
-        itemCount: m3uInitial.items.length,
-        groups: m3uInitial.groups,
-        addedAt: 'ระบบติดตั้งเริ่มต้น',
-        items: m3uInitial.items,
-      },
-    ];
-  });
-
-  const [selectedPlaylist, setSelectedPlaylist] = useState<PlaylistEntry | null>(savedPlaylists[0] || null);
+  // Start empty; users add their own playlist sources.
+  const [savedPlaylists, setSavedPlaylists] = useState<PlaylistEntry[]>([]);
+  const [selectedPlaylist, setSelectedPlaylist] = useState<PlaylistEntry | null>(null);
 
   if (!isOpen) return null;
 
   const handleImportW3U = () => {
     try {
-      const content = w3uInput.trim() || SAMPLE_W3U_CONTENT;
+      const content = w3uInput.trim();
+      if (!content) throw new Error('กรุณาวางเนื้อหา W3U ก่อนนำเข้า');
       const parsed = parseW3U(content, playlistName || 'Wiseplay W3U List');
 
       const newEntry: PlaylistEntry = {
@@ -120,7 +92,8 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
 
   const handleImportM3U = () => {
     try {
-      const content = m3uInput.trim() || SAMPLE_M3U_CONTENT;
+      const content = m3uInput.trim();
+      if (!content) throw new Error('กรุณาวางเนื้อหา M3U ก่อนนำเข้า');
       const parsed = parseM3U(content, playlistName || 'IPTV Playlist');
 
       const newEntry: PlaylistEntry = {
