@@ -492,9 +492,7 @@ export default function App() {
           setIsServersOpen(false);
           setIsPlaylistsOpen(false);
           setIsSettingsOpen(false);
-          window.setTimeout(() => {
-            document.querySelector<HTMLElement>(`[data-tv-nav="${currentTab}"]`)?.focus();
-          }, 50);
+          // The modal focus lifecycle restores the exact trigger control.
           return;
         }
         if (currentTab !== 'home') {
