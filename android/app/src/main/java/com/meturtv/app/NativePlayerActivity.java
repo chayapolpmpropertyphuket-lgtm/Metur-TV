@@ -57,7 +57,7 @@ public final class NativePlayerActivity extends AppCompatActivity {
         DefaultHttpDataSource.Factory httpFactory = new DefaultHttpDataSource.Factory()
                 .setConnectTimeoutMs(15000)
                 .setReadTimeoutMs(30000)
-                .setAllowCrossProtocolRedirects(true)
+                .setAllowCrossProtocolRedirects(false)
                 .setDefaultRequestProperties(headers);
         DefaultDataSource.Factory dataSourceFactory = new DefaultDataSource.Factory(this, httpFactory);
 
