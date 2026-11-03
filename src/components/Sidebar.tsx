@@ -82,7 +82,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: 'servers' as TabType,
       label: lang === 'th' ? 'เซิร์ฟเวอร์' : 'Servers',
       icon: Server,
-      badge: '3',
     },
     {
       id: 'playlists' as TabType,
