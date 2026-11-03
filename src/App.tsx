@@ -187,11 +187,20 @@ export default function App() {
       return Array.from(
         document.querySelectorAll<HTMLElement>(selector)
       ).filter((el) => {
-        return (
-          el.getClientRects().length > 0 &&
-          getComputedStyle(el).visibility !== 'hidden' &&
-          !el.closest('[aria-hidden="true"]')
+        if (
+          el.getClientRects().length === 0 ||
+          getComputedStyle(el).visibility === 'hidden' ||
+          el.closest('[aria-hidden="true"]')
+        ) return false;
+
+        // Ignore controls visually covered by a modal/overlay. Without this,
+        // the remote can move focus behind an open dialog.
+        const rect = el.getBoundingClientRect();
+        const topmost = document.elementFromPoint(
+          rect.left + rect.width / 2,
+          rect.top + rect.height / 2
         );
+        return Boolean(topmost && (topmost === el || el.contains(topmost)));
       });
     };
 
@@ -202,7 +211,7 @@ export default function App() {
       const active = document.activeElement as HTMLElement | null;
 
       if (!active || active === document.body ||
-          !active.matches(selector)) {
+          !active.matches(selector) || !elements.includes(active)) {
         const initial =
           document.querySelector<HTMLElement>(
             `[data-tv-nav="${currentTab}"]`
