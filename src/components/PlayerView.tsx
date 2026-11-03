@@ -86,7 +86,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
     const nativePlayer = (window as any).MeturNativePlayer;
     if (hasCustomHeaders && nativePlayer && typeof nativePlayer.play === 'function') {
       (window as any).__meturNativePlayerError = (message: string) => setStreamError(message);
-      nativePlayer.play(url, item.title, JSON.stringify(streamHeaders));
+      nativePlayer.play(url, item.title, JSON.stringify(streamHeaders), item.type);
       return () => {
         delete (window as any).__meturNativePlayerError;
       };
