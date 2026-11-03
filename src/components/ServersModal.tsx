@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { MediaServerConfig } from '../types';
 import { saveServerCredentials } from '../services/secureVault';
+import { connectJellyfinOrEmby } from '../services/mediaServerClient';
 import {
   Server,
   Plus,
@@ -18,7 +19,8 @@ interface ServersModalProps {
   servers: MediaServerConfig[];
   isOpen: boolean;
   onClose: () => void;
-  onAddServer: (server: MediaServerConfig) => void;
+  onAddServer: (server: MediaServerConfig, items: import('../types').MediaItem[]) => void;
+  onConnectServer: (server: MediaServerConfig) => void;
   onRemoveServer: (id: string) => void;
 }
 
@@ -27,6 +29,7 @@ export const ServersModal: React.FC<ServersModalProps> = ({
   isOpen,
   onClose,
   onAddServer,
+  onConnectServer,
   onRemoveServer,
 }) => {
   const [activeTab, setActiveTab] = useState<'list' | 'add'>('list');
@@ -36,6 +39,7 @@ export const ServersModal: React.FC<ServersModalProps> = ({
   const [username, setUsername] = useState('');
   const [token, setToken] = useState('');
   const [testingStatus, setTestingStatus] = useState<string | null>(null);
+  const [isConnecting, setIsConnecting] = useState(false);
 
   if (!isOpen) return null;
 
@@ -44,6 +48,8 @@ export const ServersModal: React.FC<ServersModalProps> = ({
     const normalizedUrl = serverUrl.trim();
     if (!normalizedUrl) return;
 
+    setIsConnecting(true);
+    setTestingStatus(null);
     try {
       const parsedUrl = new URL(normalizedUrl);
       if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
@@ -61,24 +67,27 @@ export const ServersModal: React.FC<ServersModalProps> = ({
         itemCount: 0,
       };
 
-      await saveServerCredentials(newServer.id, {
-        username: newServer.username,
-        token: newServer.token,
-      });
-      const safeServer: MediaServerConfig = {
-        ...newServer,
-        username: undefined,
-        token: undefined,
-      };
-      onAddServer(safeServer);
-      setTestingStatus('บันทึกเซิร์ฟเวอร์และเข้ารหัสข้อมูลรับรองในอุปกรณ์แล้ว แต่ยังไม่ได้ทดสอบการเชื่อมต่อจริง');
+      if (serverType === 'jellyfin' || serverType === 'emby') {
+        const result = await connectJellyfinOrEmby(newServer, newServer.username || '', newServer.token || '');
+        onAddServer(result.server, result.items);
+        setTestingStatus(`เชื่อมต่อสำเร็จ · ${result.items.length.toLocaleString()} รายการ${result.userName ? ` · ${result.userName}` : ''}`);
+      } else {
+        await saveServerCredentials(newServer.id, {
+          username: newServer.username,
+          token: newServer.token,
+        });
+        onAddServer({ ...newServer, username: undefined, token: undefined }, []);
+        setTestingStatus('บันทึกข้อมูลแล้ว แต่การเชื่อมต่อจริงสำหรับ Plex และ WebDAV จะเพิ่มในขั้นถัดไป');
+      }
       setActiveTab('list');
       setServerName('');
       setServerUrl('');
       setUsername('');
       setToken('');
     } catch (error) {
-      setTestingStatus(error instanceof Error ? error.message : 'URL ไม่ถูกต้อง');
+      setTestingStatus(error instanceof Error ? error.message : 'เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ');
+    } finally {
+      setIsConnecting(false);
     }
   };
 
@@ -188,13 +197,16 @@ export const ServersModal: React.FC<ServersModalProps> = ({
                         <span aria-hidden="true">·</span>
                         <span>{srv.itemCount.toLocaleString()} สื่อที่ซิงค์</span>
                         <span aria-hidden="true">·</span>
-                        <span>{srv.status === 'connected' ? 'เชื่อมต่อแล้ว' : 'ยังไม่ได้ทดสอบการเชื่อมต่อ'}</span>
+                        <span>{srv.status === 'connected' ? 'เชื่อมต่อแล้ว' : srv.status === 'error' ? 'เชื่อมต่อล้มเหลว' : 'ยังไม่ได้เชื่อมต่อ'}</span>
                       </div>
                     </div>
                   </div>
 
                   {/* Actions */}
                   <div className="flex items-center gap-2 shrink-0">
+                    {(srv.type === 'jellyfin' || srv.type === 'emby') && (
+                      <button onClick={() => onConnectServer(srv)} className="px-3 py-2 rounded-lg text-xs text-sky-300 bg-sky-500/10 hover:bg-sky-500/20" title="เชื่อมต่อและซิงค์รายการ">เชื่อมต่อ / ซิงค์</button>
+                    )}
                     <button
                       onClick={() => onRemoveServer(srv.id)}
                       className="p-2 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
@@ -312,7 +324,7 @@ export const ServersModal: React.FC<ServersModalProps> = ({
                 className="px-6 py-2.5 rounded-xl bg-white text-black text-xs font-semibold hover:bg-slate-200 transition-colors flex items-center gap-2"
               >
                 <ShieldCheck className="w-4 h-4" />
-                บันทึกเซิร์ฟเวอร์
+                {isConnecting ? 'กำลังเชื่อมต่อ...' : 'เชื่อมต่อและบันทึก'}
               </button>
             </div>
           </form>
