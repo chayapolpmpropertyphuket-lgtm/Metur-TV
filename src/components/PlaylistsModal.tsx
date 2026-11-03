@@ -406,18 +406,9 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium text-slate-400">
-                  เนื้อหา JSON ของ W3U (โครงสร้าง groups, stations, url)
-                </label>
-                <button
-                  type="button"
-                  onClick={() => setW3uInput(SAMPLE_W3U_CONTENT)}
-                  className="text-[11px] text-sky-400 hover:text-sky-300 font-medium transition-colors"
-                >
-                  ใส่ตัวอย่าง Wiseplay W3U จำลอง
-                </button>
-              </div>
+              <label className="text-xs font-medium text-slate-400">
+                เนื้อหา JSON ของ W3U (โครงสร้าง groups, stations, url)
+              </label>
               <textarea
                 rows={8}
                 placeholder="วางโค้ด JSON ของ w3u ที่นี่..."
@@ -457,18 +448,9 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium text-slate-400">
-                  เนื้อหา M3U (#EXTM3U, #EXTINF และ URL สตรีม)
-                </label>
-                <button
-                  type="button"
-                  onClick={() => setM3uInput(SAMPLE_M3U_CONTENT)}
-                  className="text-[11px] text-purple-400 hover:text-purple-300 font-medium transition-colors"
-                >
-                  ใส่ตัวอย่าง IPTV M3U จำลอง
-                </button>
-              </div>
+              <label className="text-xs font-medium text-slate-400">
+                เนื้อหา M3U (#EXTM3U, #EXTINF และ URL สตรีม)
+              </label>
               <textarea
                 rows={8}
                 placeholder="#EXTM3U&#10;#EXTINF:-1 tvg-name=&quot;Channel 1&quot; group-title=&quot;News&quot;,Channel 1&#10;https://example.com/live.m3u8"
