@@ -423,8 +423,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <button
                 type="button"
                 onClick={() => onExportDiagnostics()}
-                disabled={diagnosticEventCount === 0}
-                className="px-4 py-2 rounded-xl bg-white text-black text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+                className="px-4 py-2 rounded-xl bg-white text-black text-xs font-semibold"
               >
                 ดาวน์โหลดรายงาน JSON
               </button>
