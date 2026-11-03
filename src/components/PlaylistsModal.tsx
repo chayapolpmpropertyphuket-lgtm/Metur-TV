@@ -355,6 +355,16 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
                 return (
                   <div
                     key={pl.id}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={"เลือกเพลย์ลิสต์ " + pl.name}
+                    onKeyDown={(event) => {
+                      if (event.target !== event.currentTarget) return;
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        setSelectedPlaylist(pl);
+                      }
+                    }}
                     onClick={() => setSelectedPlaylist(pl)}
                     className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
                       isSel
@@ -431,6 +441,17 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
                     {selectedPlaylist.items.map((item, idx) => (
                       <div
                         key={item.id || idx}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={"เล่น " + item.title}
+                        onKeyDown={(event) => {
+                          if (event.target !== event.currentTarget) return;
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            onPlaylistItemSelect(item);
+                            onClose();
+                          }
+                        }}
                         onClick={() => {
                           onPlaylistItemSelect(item);
                           onClose();
