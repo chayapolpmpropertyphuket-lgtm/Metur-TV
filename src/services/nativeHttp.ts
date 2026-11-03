@@ -1,5 +1,5 @@
 type NativeHttpBridge = {
-  request(requestId: string, url: string, method: string, headersJson: string, body: string): void;
+  request(requestId: string, url: string, method: string, headersJson: string, body: string, allowRedirects: boolean): void;
 };
 
 declare global {
@@ -35,6 +35,7 @@ export async function nativeRequest<T = unknown>(
   method: 'GET' | 'POST' | 'DELETE' = 'GET',
   headers: Record<string, string> = {},
   body?: unknown,
+  options: { allowRedirects?: boolean } = {},
 ): Promise<NativeHttpResponse<T>> {
   if (typeof window === 'undefined' || !window.MeturNativeHttp) {
     throw new Error('การเชื่อมต่อ Media Server ต้องทำผ่านแอป Metur TV บน Android TV');
@@ -54,6 +55,7 @@ export async function nativeRequest<T = unknown>(
         method,
         JSON.stringify(headers),
         body === undefined ? '' : JSON.stringify(body),
+        options.allowRedirects === true,
       );
     } catch (error) {
       window.clearTimeout(timer);
