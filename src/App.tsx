@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   MediaItem,
   MediaServerConfig,
@@ -196,6 +196,8 @@ export default function App() {
   const [isServersOpen, setIsServersOpen] = useState(false);
   const [isPlaylistsOpen, setIsPlaylistsOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const modalTriggerRef = useRef<HTMLElement | null>(null);
+  const modalWasOpenRef = useRef(false);
 
   // Quick search / filter & Voice Search
   const [searchQuery, setSearchQuery] = useState('');
@@ -305,6 +307,31 @@ export default function App() {
   };
 
 
+  // Keep modal focus isolated and restore the exact invoking control on close.
+  useEffect(() => {
+    const modalOpen = isServersOpen || isPlaylistsOpen || isSettingsOpen || Boolean(detailsItem);
+    if (modalOpen && !modalWasOpenRef.current) {
+      const active = document.activeElement;
+      modalTriggerRef.current = active instanceof HTMLElement ? active : null;
+      modalWasOpenRef.current = true;
+      requestAnimationFrame(() => {
+        const root = document.querySelector<HTMLElement>('[data-tv-modal="true"]');
+        const first = root?.querySelector<HTMLElement>(
+          'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
+        );
+        first?.focus();
+        first?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      });
+    } else if (!modalOpen && modalWasOpenRef.current) {
+      modalWasOpenRef.current = false;
+      const trigger = modalTriggerRef.current;
+      modalTriggerRef.current = null;
+      requestAnimationFrame(() => {
+        if (trigger?.isConnected) trigger.focus();
+        else document.querySelector<HTMLElement>('[data-tv-nav="' + currentTab + '"]')?.focus();
+      });
+    }
+  }, [isServersOpen, isPlaylistsOpen, isSettingsOpen, detailsItem, currentTab]);
   // Android TV D-Pad Navigation Engine
   useEffect(() => {
     const selector = [
@@ -474,12 +501,8 @@ export default function App() {
           return;
         }
 
-        // Native Android bridge finishes the launcher Activity. Browser preview
-        // intentionally has no forced-close behavior.
-        const appControl = (window as any).MeturAppControl;
-        if (appControl && typeof appControl.exitApp === 'function') {
-          appControl.exitApp();
-        }
+        // Home is the root of the app. BACK must not terminate the launcher
+        // activity accidentally; use the Android Home key to leave the app.
         return;
       }
 
@@ -519,6 +542,20 @@ export default function App() {
         return;
       }
 
+      // LEFT from content enters the navigation rail; RIGHT leaves it through
+      // the spatial focus engine. The rail expands when it receives focus.
+      const sidebar = document.querySelector<HTMLElement>('aside[data-tv-sidebar="true"]');
+      const modalIsOpen = Boolean(document.querySelector('[data-tv-modal="true"]'));
+      if (e.key === 'ArrowLeft' && !modalIsOpen && sidebar && !sidebar.contains(active as Node)) {
+        const navTarget = sidebar.querySelector<HTMLElement>('[data-tv-nav="' + currentTab + '"]');
+        if (navTarget) {
+          e.preventDefault();
+          e.stopPropagation();
+          navTarget.focus();
+          navTarget.scrollIntoView({ block: 'nearest' });
+          return;
+        }
+      }
       // Standard Android TV navigation: move real focus between controls.
       // Text fields keep native left/right caret movement; up/down can leave the field.
       if (
@@ -603,17 +640,14 @@ export default function App() {
     window.scrollBy({ top: 250, behavior: 'smooth' });
   };
   const handleRemoteLeft = () => {
-    const tabs: TabType[] = ['home', 'live', 'movies', 'series', 'favorites', 'history', 'servers', 'playlists', 'settings'];
-    const currentIdx = tabs.indexOf(currentTab);
-    if (currentIdx > 0) {
-      setCurrentTab(tabs[currentIdx - 1]);
-    }
+    document.querySelector<HTMLElement>('[data-tv-nav="' + currentTab + '"]')?.focus();
   };
   const handleRemoteRight = () => {
-    const tabs: TabType[] = ['home', 'live', 'movies', 'series', 'favorites', 'history', 'servers', 'playlists', 'settings'];
-    const currentIdx = tabs.indexOf(currentTab);
-    if (currentIdx < tabs.length - 1) {
-      setCurrentTab(tabs[currentIdx + 1]);
+    const sidebar = document.querySelector<HTMLElement>('aside[data-tv-sidebar="true"]');
+    if (sidebar?.contains(document.activeElement)) {
+      const mainTarget = document.querySelector<HTMLElement>('main button:not(:disabled), main a[href], main [tabindex]:not([tabindex="-1"])');
+      mainTarget?.focus();
+      mainTarget?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     }
   };
   const handleRemoteSelect = () => {
