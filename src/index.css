@@ -34,3 +34,14 @@
   box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.8), 0 0 35px 2px rgba(255, 255, 255, 0.15);
   z-index: 20;
 }
+
+/* Android TV Remote Focus */
+button:focus-visible,
+a:focus-visible,
+[tabindex]:focus-visible {
+  outline: 3px solid #ffffff !important;
+  outline-offset: 4px;
+  box-shadow: 0 0 0 6px rgba(56, 189, 248, 0.35);
+  position: relative;
+  z-index: 100;
+}
