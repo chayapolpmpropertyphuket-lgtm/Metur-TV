@@ -28,17 +28,26 @@ export async function saveServerCredentials(
   serverId: string,
   credentials: { username?: string; token?: string },
 ): Promise<void> {
-  const native = bridge();
   const values: Array<['username' | 'token', string | undefined]> = [
     ['username', credentials.username],
     ['token', credentials.token],
   ];
-  for (const [field, value] of values) {
-    if (!value) continue;
-    const result = native.putSecret(credentialKey(serverId, field), value);
-    if (result !== 'OK') {
-      throw new Error('ไม่สามารถเข้ารหัสและบันทึกข้อมูลรับรองบนอุปกรณ์ได้');
+  if (!values.some(([, value]) => Boolean(value))) return;
+  const native = bridge();
+  const saved: string[] = [];
+  try {
+    for (const [field, value] of values) {
+      if (!value) continue;
+      const key = credentialKey(serverId, field);
+      const result = native.putSecret(key, value);
+      if (result !== 'OK') {
+        throw new Error('ไม่สามารถเข้ารหัสและบันทึกข้อมูลรับรองบนอุปกรณ์ได้');
+      }
+      saved.push(key);
     }
+  } catch (error) {
+    for (const key of saved) native.deleteSecret(key);
+    throw error;
   }
 }
 
