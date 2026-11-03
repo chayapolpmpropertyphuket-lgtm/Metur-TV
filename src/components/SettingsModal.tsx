@@ -28,6 +28,7 @@ interface SettingsModalProps {
   diagnosticEventCount: number;
   onDiagnosticsToggle: (enabled: boolean) => void;
   onExportDiagnostics: () => void;
+  diagnosticsExportStatus: string;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -40,6 +41,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   diagnosticEventCount,
   onDiagnosticsToggle,
   onExportDiagnostics,
+  diagnosticsExportStatus,
 }) => {
   const [backupStatus, setBackupStatus] = useState<string | null>(null);
 
@@ -420,13 +422,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <span className="text-xs text-slate-400">เหตุการณ์ที่บันทึก: {diagnosticEventCount}</span>
               <button
                 type="button"
-                onClick={onExportDiagnostics}
+                onClick={() => onExportDiagnostics()}
                 disabled={diagnosticEventCount === 0}
                 className="px-4 py-2 rounded-xl bg-white text-black text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 ดาวน์โหลดรายงาน JSON
               </button>
             </div>
+            {diagnosticsExportStatus && (
+              <p role="status" className="text-xs text-emerald-300">{diagnosticsExportStatus}</p>
+            )}
             <p className="text-[11px] text-slate-500 leading-relaxed">ไม่เก็บรหัสผ่าน โทเคน ข้อความที่กรอก ชื่อสื่อ URL หรือข้อมูลเซิร์ฟเวอร์ รายงานจะถูกสร้างเมื่อคุณกดดาวน์โหลดเท่านั้น</p>
           </div>
         </section>
