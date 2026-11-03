@@ -465,7 +465,7 @@ export default function App() {
     try {
       const username = await getServerCredential(server.id, 'username') ?? '';
       const token = await getServerCredential(server.id, 'token') ?? '';
-      const result = await connectJellyfinOrEmby(server, username, token);
+      const result = await connectJellyfinOrEmby(server, username, token, true);
       setServers((prev) => prev.map((entry) => entry.id === server.id ? result.server : entry));
       setServerItems((prev) => [...result.items, ...prev.filter((item) => item.serverId !== server.id)]);
     } catch (error) {
