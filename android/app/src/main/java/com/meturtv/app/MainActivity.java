@@ -15,6 +15,7 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.webkit.JavascriptInterface;
 import androidx.webkit.WebViewAssetLoader;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
@@ -51,6 +52,7 @@ public class MainActivity extends AppCompatActivity {
         mWebView.addJavascriptInterface(new SecureVaultBridge(this), "MeturSecureVault");
         mWebView.addJavascriptInterface(new NativeHttpBridge(mWebView), "MeturNativeHttp");
         mWebView.addJavascriptInterface(new NativePlayerBridge(this), "MeturNativePlayer");
+        mWebView.addJavascriptInterface(new AppControlBridge(), "MeturAppControl");
         setContentView(mWebView);
 
         setupWebView();
@@ -239,8 +241,22 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void dispatchKeyToJs(String keyName) {
-        String script = "window.dispatchEvent(new KeyboardEvent('keydown', { key: '" + keyName + "', bubbles: true }));";
+        if (mWebView == null) return;
+        String script = "window.dispatchEvent(new KeyboardEvent('keydown', { key: '" + keyName
+                + "', bubbles: true, cancelable: true }));";
         mWebView.evaluateJavascript(script, null);
+    }
+
+    /** Explicit app-exit bridge used only after the web UI has handled Back navigation. */
+    private final class AppControlBridge {
+        @JavascriptInterface
+        public void exitApp() {
+            runOnUiThread(() -> {
+                if (!isFinishing()) {
+                    finish();
+                }
+            });
+        }
     }
 
     private void hideSystemUI() {
