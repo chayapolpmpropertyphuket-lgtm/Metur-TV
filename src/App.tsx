@@ -297,13 +297,54 @@ export default function App() {
 
       const active = document.activeElement;
 
+      // Handle Back before text-input guards so the remote can always dismiss
+      // overlays or leave the app, even while a form field owns focus.
+      const isBack = e.key === 'Escape' || e.key === 'Backspace' ||
+        e.key === 'BrowserBack' || e.keyCode === 4;
+      if (isBack) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (playingItem) return;
+        if (detailsItem) {
+          setDetailsItem(null);
+          return;
+        }
+        if (isServersOpen || isPlaylistsOpen || isSettingsOpen) {
+          setIsServersOpen(false);
+          setIsPlaylistsOpen(false);
+          setIsSettingsOpen(false);
+          window.setTimeout(() => {
+            document.querySelector<HTMLElement>(`[data-tv-nav="${currentTab}"]`)?.focus();
+          }, 50);
+          return;
+        }
+        if (currentTab !== 'home') {
+          setCurrentTab('home');
+          window.setTimeout(() => {
+            document.querySelector<HTMLElement>('[data-tv-nav="home"]')?.focus();
+          }, 50);
+          return;
+        }
+
+        // Native Android bridge finishes the launcher Activity. Browser preview
+        // intentionally has no forced-close behavior.
+        const appControl = (window as any).MeturAppControl;
+        if (appControl && typeof appControl.exitApp === 'function') {
+          appControl.exitApp();
+        }
+        return;
+      }
+
       if (
         active instanceof HTMLInputElement ||
         active instanceof HTMLTextAreaElement ||
         active instanceof HTMLSelectElement ||
         (active instanceof HTMLElement && active.isContentEditable)
       ) {
-        return;
+        // Let text fields use left/right for caret movement, but retain D-pad
+        // up/down navigation so users can leave a focused field.
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') return;
       }
 
       // Quick channel tuning
@@ -366,26 +407,19 @@ export default function App() {
         return;
       }
 
-      // Back button
-      if (e.key === 'Escape') {
-        if (isServersOpen || isPlaylistsOpen ||
-            isSettingsOpen || detailsItem) {
-          setIsServersOpen(false);
-          setIsPlaylistsOpen(false);
-          setIsSettingsOpen(false);
-          setDetailsItem(null);
-        }
-      }
+      // Back is handled before form-field guards above.
     };
 
-    // Initial focus on active sidebar item
+    // Focus the active modal first; otherwise focus the selected sidebar tab.
     const initialTimer = window.setTimeout(() => {
-      if (document.activeElement === document.body) {
-        document
-          .querySelector<HTMLElement>(
-            `[data-tv-nav="${currentTab}"]`
-          )
-          ?.focus();
+      if (document.activeElement === document.body ||
+          document.activeElement === document.documentElement) {
+        const modal = document.querySelector<HTMLElement>(
+          '.fixed.inset-0 [autofocus], .fixed.inset-0 button:not(:disabled), .fixed.inset-0 input:not(:disabled)'
+        );
+        const target = modal ||
+          document.querySelector<HTMLElement>(`[data-tv-nav="${currentTab}"]`);
+        target?.focus();
       }
     }, 300);
 
