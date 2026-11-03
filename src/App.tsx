@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   MediaItem,
   MediaServerConfig,
@@ -58,6 +58,7 @@ export default function App() {
 
   // Opt-in, local-only diagnostics. Never record field values, URLs, credentials,
   // media titles, or server details.
+  const [diagnosticsExportStatus, setDiagnosticsExportStatus] = useState('');
   const [diagnosticsEnabled, setDiagnosticsEnabled] = useState(
     () => localStorage.getItem('metur_diagnostics_enabled') === 'true'
   );
@@ -155,15 +156,35 @@ export default function App() {
       privacy: 'No passwords, tokens, form values, media titles, server addresses, or URLs are collected.',
       events: diagnosticEvents,
     };
-    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `metur-tv-diagnostics-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
+    const filename = `metur-tv-diagnostics-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    const json = JSON.stringify(report, null, 2);
+    const nativeBridge = (window as any).MeturDiagnosticsBridge;
+    if (nativeBridge && typeof nativeBridge.saveReport === 'function') {
+      try {
+        const result = nativeBridge.saveReport(filename, json);
+        setDiagnosticsExportStatus(result || 'บันทึกรายงานลงโฟลเดอร์ Downloads แล้ว');
+        return;
+      } catch {
+        setDiagnosticsExportStatus('บันทึกผ่าน Android ไม่สำเร็จ กรุณาลองใหม่');
+        return;
+      }
+    }
+
+    try {
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = filename;
+      anchor.style.display = 'none';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 30000);
+      setDiagnosticsExportStatus('เริ่มดาวน์โหลดรายงานแล้ว');
+    } catch {
+      setDiagnosticsExportStatus('ดาวน์โหลดไม่สำเร็จบนอุปกรณ์นี้');
+    }
   };
 
   // Active / Focused Item State for 10-ft TV experience
@@ -183,34 +204,7 @@ export default function App() {
   // Quick Channel Number Tuning overlay feedback
   const [quickTuneNumber, setQuickTuneNumber] = useState<string | null>(null);
 
-  // Software cursor controlled by a standard Android TV D-pad remote.
-  const [remoteCursor, setRemoteCursor] = useState(() => ({
-    x: Math.round(window.innerWidth / 2),
-    y: Math.round(window.innerHeight / 2),
-  }));
-  const hoverTargetRef = useRef<Element | null>(null);
-
-  // Keep browser hover state synchronized with the software cursor so React
-  // hover handlers (including the expandable sidebar) behave like a real mouse.
-  useEffect(() => {
-    const nextTarget = document.elementFromPoint(remoteCursor.x, remoteCursor.y);
-    const previousTarget = hoverTargetRef.current;
-    if (previousTarget !== nextTarget) {
-      previousTarget?.dispatchEvent(new MouseEvent('mouseout', {
-        bubbles: true, cancelable: true, view: window, relatedTarget: nextTarget,
-        clientX: remoteCursor.x, clientY: remoteCursor.y,
-      }));
-      nextTarget?.dispatchEvent(new MouseEvent('mouseover', {
-        bubbles: true, cancelable: true, view: window, relatedTarget: previousTarget,
-        clientX: remoteCursor.x, clientY: remoteCursor.y,
-      }));
-      hoverTargetRef.current = nextTarget;
-    }
-    nextTarget?.dispatchEvent(new MouseEvent('mousemove', {
-      bubbles: true, cancelable: true, view: window,
-      clientX: remoteCursor.x, clientY: remoteCursor.y,
-    }));
-  }, [remoteCursor]);
+  // Standard Android TV navigation uses real DOM focus; no simulated mouse cursor.
 
   // Load persisted app metadata. Server credentials remain in Android Keystore.
   useEffect(() => {
@@ -428,10 +422,21 @@ export default function App() {
           block: 'nearest',
           inline: 'nearest'
         });
-      } else if (direction === 'ArrowUp') {
-        window.scrollBy({ top: -200, behavior: 'smooth' });
-      } else if (direction === 'ArrowDown') {
-        window.scrollBy({ top: 200, behavior: 'smooth' });
+      } else if (direction === 'ArrowUp' || direction === 'ArrowDown') {
+        // At the edge of a focus group, scroll its nearest scrollable panel.
+        let parent = active.parentElement;
+        while (parent && parent !== document.body) {
+          const style = getComputedStyle(parent);
+          if (/(auto|scroll|overlay)/.test(style.overflowY) &&
+              parent.scrollHeight > parent.clientHeight + 2) break;
+          parent = parent.parentElement;
+        }
+        const delta = direction === 'ArrowDown' ? 220 : -220;
+        if (parent && parent !== document.body) {
+          parent.scrollBy({ top: delta, behavior: 'smooth' });
+        } else {
+          window.scrollBy({ top: delta, behavior: 'smooth' });
+        }
       }
     };
 
@@ -514,7 +519,8 @@ export default function App() {
         return;
       }
 
-      // D-pad moves the on-screen cursor. Keep native text editing intact.
+      // Standard Android TV navigation: move real focus between controls.
+      // Text fields keep native left/right caret movement; up/down can leave the field.
       if (
         e.key === 'ArrowUp' || e.key === 'ArrowDown' ||
         e.key === 'ArrowLeft' || e.key === 'ArrowRight'
@@ -523,85 +529,28 @@ export default function App() {
           active instanceof HTMLTextAreaElement ||
           active instanceof HTMLSelectElement ||
           (active instanceof HTMLElement && active.isContentEditable);
-        if (editing) return;
+        if (editing && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return;
         e.preventDefault();
         e.stopPropagation();
-        const step = e.repeat ? 30 : 42;
-        const movingDown = e.key === 'ArrowDown';
-        const movingUp = e.key === 'ArrowUp';
-        const nextY = remoteCursor.y + (movingDown ? step : movingUp ? -step : 0);
-        const edge = 28;
-
-        // When the pointer reaches the top/bottom edge, scroll the nearest
-        // scrollable panel (modal/forms first), then keep the pointer visible.
-        if ((movingDown && nextY >= window.innerHeight - edge) ||
-            (movingUp && nextY <= edge)) {
-          const targetAtCursor = document.elementFromPoint(remoteCursor.x, remoteCursor.y) as HTMLElement | null;
-          let scrollParent: HTMLElement | null = targetAtCursor;
-          while (scrollParent && scrollParent !== document.body) {
-            const style = window.getComputedStyle(scrollParent);
-            const canScroll = /(auto|scroll|overlay)/.test(style.overflowY) &&
-              scrollParent.scrollHeight > scrollParent.clientHeight + 2;
-            if (canScroll) break;
-            scrollParent = scrollParent.parentElement;
-          }
-
-          const delta = movingDown ? 220 : -220;
-          if (scrollParent && scrollParent !== document.body) {
-            scrollParent.scrollBy({ top: delta, behavior: 'smooth' });
-          } else {
-            window.scrollBy({ top: delta, behavior: 'smooth' });
-            const root = document.scrollingElement;
-            if (root && root.scrollHeight <= root.clientHeight + 2) {
-              const fallback = targetAtCursor?.closest<HTMLElement>('[data-tv-modal="true"]')
-                ?.querySelector<HTMLElement>('[class*="overflow-y-auto"], [class*="overflow-auto"]');
-              fallback?.scrollBy({ top: delta, behavior: 'smooth' });
-            }
-          }
-
-          setRemoteCursor((point) => ({
-            ...point,
-            y: movingDown ? Math.max(40, window.innerHeight - 90) : 90,
-          }));
-          return;
-        }
-
-        setRemoteCursor((point) => ({
-          x: Math.max(8, Math.min(window.innerWidth - 8,
-            point.x + (e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0))),
-          y: Math.max(8, Math.min(window.innerHeight - 8,
-            point.y + (movingUp ? -step : movingDown ? step : 0))),
-        }));
+        moveFocus(e.key as 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight');
         return;
       }
 
-      // OK focuses form controls explicitly so Android WebView can open its
-      // soft keyboard; clicking a surrounding label/container is not enough.
+      // MainActivity forwards remote OK as a DOM key event. Activate the
+      // actually-focused control instead of hit-testing a simulated cursor.
       if (e.key === 'Enter' || e.key === ' ') {
-        const editing = active instanceof HTMLInputElement ||
-          active instanceof HTMLTextAreaElement ||
-          active instanceof HTMLSelectElement ||
-          (active instanceof HTMLElement && active.isContentEditable);
-        if (editing) return;
-        e.preventDefault();
-        e.stopPropagation();
-
-        const target = document.elementFromPoint(remoteCursor.x, remoteCursor.y) as HTMLElement | null;
-        const control = target?.matches('input:not(:disabled), textarea:not(:disabled), select:not(:disabled)')
-          ? target
-          : target?.closest<HTMLElement>('input:not(:disabled), textarea:not(:disabled), select:not(:disabled)') ||
-            (target?.closest('label') as HTMLLabelElement | null)?.control as HTMLElement | null;
-
-        if (control && !control.matches('input[type="hidden"]')) {
-          control.focus();
-          control.click();
+        if (active instanceof HTMLInputElement ||
+            active instanceof HTMLTextAreaElement ||
+            active instanceof HTMLSelectElement ||
+            (active instanceof HTMLElement && active.isContentEditable)) {
           return;
         }
-
-        const clickable = target?.closest<HTMLElement>(
-          'button:not(:disabled), a[href], [role="button"], [onclick], [tabindex]:not([tabindex="-1"])'
-        ) || target;
-        clickable?.click();
+        const focused = active instanceof HTMLElement ? active : null;
+        if (focused && focused !== document.body && focused.matches(selector)) {
+          e.preventDefault();
+          e.stopPropagation();
+          focused.click();
+        }
         return;
       }
 
@@ -639,7 +588,6 @@ export default function App() {
     liveChannels,
     settings.quickChannelTuning,
     currentTab,
-    remoteCursor
   ]);
 
 
@@ -1282,6 +1230,7 @@ export default function App() {
         diagnosticEventCount={diagnosticEvents.length}
         onDiagnosticsToggle={handleDiagnosticsToggle}
         onExportDiagnostics={handleExportDiagnostics}
+        diagnosticsExportStatus={diagnosticsExportStatus}
       />
 
 
@@ -1292,27 +1241,6 @@ export default function App() {
         onPlay={(item) => startPlaying(item)}
         onToggleFavorite={handleToggleFavorite}
       />
-
-      {/* Software cursor for standard D-pad remotes */}
-      <div
-        aria-hidden="true"
-        style={{
-          position: 'fixed',
-          left: remoteCursor.x - 2,
-          top: remoteCursor.y - 1,
-          zIndex: 99999,
-          width: 24,
-          height: 30,
-          pointerEvents: 'none',
-          transform: 'none',
-          filter: 'drop-shadow(0 1px 3px rgba(0,0,0,.95))',
-        }}
-      >
-        <svg width="24" height="30" viewBox="0 0 24 30">
-          <path d="M2 1 L2 23 L7.5 17.5 L12 27 L16 25 L11.5 15.5 L20 15 Z"
-            fill="#ffffff" stroke="#111827" strokeWidth="1.8" strokeLinejoin="round" />
-        </svg>
-      </div>
 
       {/* 6. Virtual Remote Controller for testing Android TV D-Pad directly */}
       <VirtualRemote
