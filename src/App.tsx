@@ -545,6 +545,38 @@ export default function App() {
               </div>
             )}
 
+            {allMediaItems.length === 0 ? (
+              <div className="flex-1 min-h-[55vh] flex flex-col items-center justify-center text-center gap-5">
+                <div className="w-20 h-20 rounded-3xl bg-white/[0.04] border border-white/10 flex items-center justify-center">
+                  <Tv className="w-9 h-9 text-slate-500" />
+                </div>
+                <div className="max-w-lg">
+                  <h1 className="text-2xl font-semibold text-white">
+                    {settings.language === 'th' ? 'ยินดีต้อนรับสู่ Metur TV' : 'Welcome to Metur TV'}
+                  </h1>
+                  <p className="text-sm text-slate-400 mt-2 leading-relaxed">
+                    {settings.language === 'th'
+                      ? 'ยังไม่มีรายการในคลังของคุณ เพิ่มเพลย์ลิสต์หรือเชื่อมต่อมีเดียเซิร์ฟเวอร์เพื่อเริ่มต้น'
+                      : 'Your library is empty. Add a playlist or connect a media server to get started.'}
+                  </p>
+                </div>
+                <div className="flex flex-wrap justify-center gap-3">
+                  <button
+                    onClick={() => setIsPlaylistsOpen(true)}
+                    className="px-5 py-3 rounded-xl bg-white text-black text-sm font-semibold hover:bg-slate-200 transition-colors"
+                  >
+                    + เพิ่ม Playlist / Stream URL
+                  </button>
+                  <button
+                    onClick={() => setIsServersOpen(true)}
+                    className="px-5 py-3 rounded-xl bg-white/10 border border-white/10 text-white text-sm font-semibold hover:bg-white/15 transition-colors"
+                  >
+                    + เพิ่ม Media Server
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
             {/* Dynamic Hero Banner */}
             {!searchQuery && focusedItem && (
               <HeroBanner
@@ -622,7 +654,9 @@ export default function App() {
               onFocusItem={(item) => setFocusedItem(item)}
               onToggleFavorite={handleToggleFavorite}
             />
-          </div>
+
+              </>
+            )}          </div>
         )}
 
         {/* ================= VIEW: LIVE TV / IPTV ================= */}
