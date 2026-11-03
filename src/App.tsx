@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   MediaItem,
   MediaServerConfig,
@@ -74,7 +74,33 @@ export default function App() {
   const [quickTuneNumber, setQuickTuneNumber] = useState<string | null>(null);
 
   // Software cursor controlled by a standard Android TV D-pad remote.
-  const [remoteCursor, setRemoteCursor] = useState({ x: 640, y: 360 });
+  const [remoteCursor, setRemoteCursor] = useState(() => ({
+    x: Math.round(window.innerWidth / 2),
+    y: Math.round(window.innerHeight / 2),
+  }));
+  const hoverTargetRef = useRef<Element | null>(null);
+
+  // Keep browser hover state synchronized with the software cursor so React
+  // hover handlers (including the expandable sidebar) behave like a real mouse.
+  useEffect(() => {
+    const nextTarget = document.elementFromPoint(remoteCursor.x, remoteCursor.y);
+    const previousTarget = hoverTargetRef.current;
+    if (previousTarget !== nextTarget) {
+      previousTarget?.dispatchEvent(new MouseEvent('mouseout', {
+        bubbles: true, cancelable: true, view: window, relatedTarget: nextTarget,
+        clientX: remoteCursor.x, clientY: remoteCursor.y,
+      }));
+      nextTarget?.dispatchEvent(new MouseEvent('mouseover', {
+        bubbles: true, cancelable: true, view: window, relatedTarget: previousTarget,
+        clientX: remoteCursor.x, clientY: remoteCursor.y,
+      }));
+      hoverTargetRef.current = nextTarget;
+    }
+    nextTarget?.dispatchEvent(new MouseEvent('mousemove', {
+      bubbles: true, cancelable: true, view: window,
+      clientX: remoteCursor.x, clientY: remoteCursor.y,
+    }));
+  }, [remoteCursor]);
 
   // Load persisted app metadata. Server credentials remain in Android Keystore.
   useEffect(() => {
@@ -1106,13 +1132,13 @@ export default function App() {
         aria-hidden="true"
         style={{
           position: 'fixed',
-          left: remoteCursor.x,
-          top: remoteCursor.y,
+          left: remoteCursor.x - 2,
+          top: remoteCursor.y - 1,
           zIndex: 99999,
           width: 24,
           height: 30,
           pointerEvents: 'none',
-          transform: 'translate(-2px, -2px)',
+          transform: 'none',
           filter: 'drop-shadow(0 1px 3px rgba(0,0,0,.95))',
         }}
       >
