@@ -46,6 +46,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
 
+  const eventSafeContainsActive = () => {
+    if (typeof document === 'undefined') return false;
+    return document.querySelector('[data-tv-sidebar="true"]')?.contains(document.activeElement) ?? false;
+  };
+
   const navItems = [
     {
       id: 'home' as TabType,
@@ -97,8 +102,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <aside
+      data-tv-sidebar="true"
+      aria-label={lang === 'th' ? 'เมนูหลัก' : 'Main navigation'}
+      onFocusCapture={() => setIsExpanded(true)}
+      onBlurCapture={(event) => {
+        const next = event.relatedTarget;
+        if (!(next instanceof Node) || !event.currentTarget.contains(next)) {
+          setIsExpanded(false);
+        }
+      }}
       onMouseEnter={() => setIsExpanded(true)}
-      onMouseLeave={() => setIsExpanded(false)}
+      onMouseLeave={() => {
+        if (!eventSafeContainsActive()) setIsExpanded(false);
+      }}
       className={`fixed left-0 top-0 bottom-0 z-40 flex flex-col justify-between py-6 px-3.5 transition-all duration-300 ease-in-out border-r border-white/5 backdrop-blur-2xl ${
         isExpanded || isFocused
           ? 'w-64 bg-[#08090f]/95 shadow-2xl shadow-black/80'
@@ -135,8 +151,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
             return (
               <button
+                type="button"
                 key={item.id}
                 data-tv-nav={item.id}
+                aria-current={isActive ? 'page' : undefined}
+                aria-label={item.label}
                 onClick={() => onSelectTab(item.id)}
                 className={`relative flex items-center gap-3.5 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 text-left outline-none ${
                   isActive
