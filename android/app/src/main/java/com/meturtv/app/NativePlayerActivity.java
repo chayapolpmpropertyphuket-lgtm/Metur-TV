@@ -8,16 +8,15 @@ import android.widget.Toast;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 
-import com.google.android.exoplayer2.MediaItem;
-import com.google.android.exoplayer2.PlaybackException;
-import com.google.android.exoplayer2.Player;
-import com.google.android.exoplayer2.ext.mediasession.MediaSessionConnector;
-import com.google.android.exoplayer2.source.DefaultMediaSourceFactory;
-import com.google.android.exoplayer2.ui.AspectRatioFrameLayout;
-import com.google.android.exoplayer2.ui.PlayerView;
-import com.google.android.exoplayer2.upstream.DefaultDataSource;
-import com.google.android.exoplayer2.upstream.DefaultHttpDataSource;
-import com.google.android.exoplayer2.ExoPlayer;
+import androidx.media3.common.MediaItem;
+import androidx.media3.common.PlaybackException;
+import androidx.media3.common.Player;
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
+import androidx.media3.ui.AspectRatioFrameLayout;
+import androidx.media3.ui.PlayerView;
+import androidx.media3.datasource.DefaultDataSource;
+import androidx.media3.datasource.DefaultHttpDataSource;
+import androidx.media3.exoplayer.ExoPlayer;
 
 import org.json.JSONObject;
 
@@ -71,7 +70,7 @@ public final class NativePlayerActivity extends AppCompatActivity {
                 .setUri(Uri.parse(url))
                 .setMediaId(title == null ? "Metur TV" : title);
         if (url.toLowerCase(java.util.Locale.ROOT).contains(".m3u8")) {
-            mediaBuilder.setMimeType(com.google.android.exoplayer2.util.MimeTypes.APPLICATION_M3U8);
+            mediaBuilder.setMimeType(androidx.media3.common.MimeTypes.APPLICATION_M3U8);
         }
         player.setMediaItem(mediaBuilder.build());
         player.addListener(new Player.Listener() {
