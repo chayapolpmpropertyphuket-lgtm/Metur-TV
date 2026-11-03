@@ -37,6 +37,7 @@ export async function nativeRequest<T = unknown>(
   } catch {
     throw new Error('รูปแบบการตอบกลับจากระบบเครือข่ายไม่ถูกต้อง');
   }
+  if (!result.ok && result.error) throw new Error(result.error);
   if (result.ok && result.body) {
     try {
       result.data = JSON.parse(result.body) as T;
