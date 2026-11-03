@@ -56,6 +56,100 @@ export default function App() {
   const [watchHistory, setWatchHistory] = useState<MediaItem[]>([]);
   const [storageReady, setStorageReady] = useState(false);
 
+  // Opt-in, local-only diagnostics. Never record field values, URLs, credentials,
+  // media titles, or server details.
+  const [diagnosticsEnabled, setDiagnosticsEnabled] = useState(
+    () => localStorage.getItem('metur_diagnostics_enabled') === 'true'
+  );
+  const [diagnosticEvents, setDiagnosticEvents] = useState<Array<Record<string, unknown>>>([]);
+
+  useEffect(() => {
+    if (!diagnosticsEnabled) return;
+    const record = (type: string, detail: Record<string, unknown> = {}) => {
+      const event = { at: new Date().toISOString(), type, ...detail };
+      setDiagnosticEvents((previous) => [...previous.slice(-499), event]);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      const keys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'Escape', 'Backspace'];
+      if (!keys.includes(event.key)) return;
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      record('remote_key', {
+        key: event.key,
+        targetTag: target?.tagName || 'unknown',
+        targetRole: target?.getAttribute('role') || undefined,
+        targetType: target instanceof HTMLInputElement ? target.type : undefined,
+      });
+    };
+    const onFocus = (event: FocusEvent) => {
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (!target) return;
+      record('focus', {
+        targetTag: target.tagName,
+        targetRole: target.getAttribute('role') || undefined,
+        targetType: target instanceof HTMLInputElement ? target.type : undefined,
+      });
+    };
+    const onError = () => record('window_error');
+    const onRejection = () => record('unhandled_promise_rejection');
+    const onScroll = (event: Event) => {
+      const target = event.target instanceof HTMLElement ? event.target : document.documentElement;
+      record('scroll', {
+        targetTag: target.tagName,
+        scrollTop: Math.round(target.scrollTop || window.scrollY),
+        clientHeight: target.clientHeight || window.innerHeight,
+        scrollHeight: target.scrollHeight || document.documentElement.scrollHeight,
+      });
+    };
+    window.addEventListener('keydown', onKey, true);
+    window.addEventListener('focusin', onFocus, true);
+    window.addEventListener('error', onError);
+    window.addEventListener('unhandledrejection', onRejection);
+    window.addEventListener('scroll', onScroll, true);
+    record('diagnostics_started', { appVersion: '2.4.0' });
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('focusin', onFocus, true);
+      window.removeEventListener('error', onError);
+      window.removeEventListener('unhandledrejection', onRejection);
+      window.removeEventListener('scroll', onScroll, true);
+    };
+  }, [diagnosticsEnabled]);
+
+  const handleDiagnosticsToggle = (enabled: boolean) => {
+    localStorage.setItem('metur_diagnostics_enabled', String(enabled));
+    setDiagnosticsEnabled(enabled);
+    if (!enabled) {
+      setDiagnosticEvents([]);
+      localStorage.removeItem('metur_diagnostics_events');
+    }
+  };
+
+  const handleExportDiagnostics = () => {
+    const report = {
+      product: 'Metur TV',
+      appVersion: '2.4.0',
+      exportedAt: new Date().toISOString(),
+      diagnosticsEnabled,
+      device: {
+        userAgent: navigator.userAgent,
+        screen: { width: window.screen.width, height: window.screen.height },
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        language: navigator.language,
+      },
+      privacy: 'No passwords, tokens, form values, media titles, server addresses, or URLs are collected.',
+      events: diagnosticEvents,
+    };
+    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `metur-tv-diagnostics-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  };
+
   // Active / Focused Item State for 10-ft TV experience
   const [focusedItem, setFocusedItem] = useState<MediaItem | null>(null);
   const [playingItem, setPlayingItem] = useState<MediaItem | null>(null);
@@ -1168,6 +1262,10 @@ export default function App() {
         onClose={() => setIsSettingsOpen(false)}
         settings={settings}
         onUpdateSettings={(newVals) => setSettings({ ...settings, ...newVals })}
+        diagnosticsEnabled={diagnosticsEnabled}
+        diagnosticEventCount={diagnosticEvents.length}
+        onDiagnosticsToggle={handleDiagnosticsToggle}
+        onExportDiagnostics={handleExportDiagnostics}
       />
 
 
