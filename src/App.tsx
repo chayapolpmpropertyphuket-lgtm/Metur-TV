@@ -20,6 +20,7 @@ import { ChannelGuide } from './components/ChannelGuide';
 import { VirtualRemote } from './components/VirtualRemote';
 import { VoiceSearch } from './components/VoiceSearch';
 import { loadAppState, saveAppState } from './services/localStore';
+import { deleteServerCredentials } from './services/secureVault';
 import {
   Server,
   ListPlus,
@@ -439,7 +440,11 @@ export default function App() {
   };
 
   const handleRemoveServer = (id: string) => {
-    setServers((prev) => prev.filter((s) => s.id !== id));
+    deleteServerCredentials(id).catch((error) => {
+      console.error('[Metur TV] Could not clear encrypted credentials:', error);
+    }).finally(() => {
+      setServers((prev) => prev.filter((server) => server.id !== id));
+    });
   };
 
 
