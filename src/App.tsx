@@ -19,6 +19,7 @@ import { MediaDetailsModal } from './components/MediaDetailsModal';
 import { ChannelGuide } from './components/ChannelGuide';
 import { VirtualRemote } from './components/VirtualRemote';
 import { VoiceSearch } from './components/VoiceSearch';
+import { loadAppState, saveAppState } from './services/localStore';
 import {
   Server,
   ListPlus,
@@ -50,6 +51,7 @@ export default function App() {
 
   // Watch History
   const [watchHistory, setWatchHistory] = useState<MediaItem[]>([]);
+  const [storageReady, setStorageReady] = useState(false);
 
   // Active / Focused Item State for 10-ft TV experience
   const [focusedItem, setFocusedItem] = useState<MediaItem | null>(null);
@@ -67,6 +69,49 @@ export default function App() {
 
   // Quick Channel Number Tuning overlay feedback
   const [quickTuneNumber, setQuickTuneNumber] = useState<string | null>(null);
+
+  // Load local-only app data once. Server credentials are deliberately excluded
+  // until the Android Keystore bridge is available.
+  useEffect(() => {
+    let active = true;
+    loadAppState()
+      .then((saved) => {
+        if (!active || !saved) return;
+        if (saved.settings) setSettings(saved.settings);
+        if (saved.servers) setServers(saved.servers.map((server) => ({
+          ...server,
+          username: undefined,
+          token: undefined,
+          status: 'disconnected' as const,
+        })));
+        if (saved.w3uItems) setW3uItems(saved.w3uItems);
+        if (saved.continueWatching) setContinueWatching(saved.continueWatching);
+        if (saved.liveChannels) setLiveChannels(saved.liveChannels);
+        if (saved.featuredItems) setFeaturedItems(saved.featuredItems);
+        if (saved.watchHistory) setWatchHistory(saved.watchHistory);
+      })
+      .catch((error) => console.error('[Metur TV] Local database load failed:', error))
+      .finally(() => {
+        if (active) setStorageReady(true);
+      });
+    return () => { active = false; };
+  }, []);
+
+  // Persist user data locally. Never write server usernames, API keys or tokens
+  // into IndexedDB; those require the native encrypted credential vault.
+  useEffect(() => {
+    if (!storageReady) return;
+    const safeServers = servers.map(({ username: _username, token: _token, ...server }) => server);
+    saveAppState({
+      settings,
+      servers: safeServers,
+      w3uItems,
+      continueWatching,
+      liveChannels,
+      featuredItems,
+      watchHistory,
+    }).catch((error) => console.error('[Metur TV] Local database save failed:', error));
+  }, [storageReady, settings, servers, w3uItems, continueWatching, liveChannels, featuredItems, watchHistory]);
 
   // Compute all favorites
   const allMediaItems = [...featuredItems, ...liveChannels, ...w3uItems, ...continueWatching];
@@ -461,49 +506,26 @@ export default function App() {
             </span>
           </div>
 
-          {/* Zone 2: Voice Search bar with Web Speech API */}
-          <div className="flex items-center gap-3 flex-1 max-w-md">
-            <VoiceSearch
-              searchQuery={searchQuery}
-              onSearchChange={(q) => setSearchQuery(q)}
-              lang={settings.language}
-              isListeningExternal={isVoiceListening}
-              onListeningChange={(l) => setIsVoiceListening(l)}
-              placeholder={
-                settings.language === 'th'
-                  ? 'ค้นหาด้วยเสียง หรือพิมพ์ชื่อสื่อ...'
-                  : 'Voice search or type media title...'
-              }
-            />
-          </div>
-
-          {/* Zone 3: Primary Action buttons (Servers, Playlists W3U, Settings) */}
-          <div className="flex items-center gap-2.5 shrink-0">
-            <button
-              onClick={() => setIsPlaylistsOpen(true)}
-              className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold backdrop-blur-md transition-all hover:scale-102 border border-white/10 whitespace-nowrap"
-            >
-              <ListPlus className="w-4 h-4 text-sky-400" />
-              <span>เพลย์ลิสต์ W3U / M3U</span>
-            </button>
-
-            <button
-              onClick={() => setIsServersOpen(true)}
-              className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-white text-black text-xs font-bold hover:bg-slate-200 transition-all hover:scale-102 shadow-lg shadow-white/5 whitespace-nowrap"
-            >
-              <Server className="w-4 h-4" />
-              <span>เซิร์ฟเวอร์ ({servers.length})</span>
-            </button>
-
-
-            <button
-              onClick={() => setIsSettingsOpen(true)}
-              className="p-2 rounded-xl bg-white/5 hover:bg-white/15 text-slate-300 hover:text-white transition-colors border border-white/5"
-              title="ตั้งค่า Android TV"
-            >
-              <SlidersHorizontal className="w-4 h-4" />
-            </button>
-          </div>
+          {/* Search is shown after the user has added media */}
+          {allMediaItems.length > 0 && (
+            <div className="flex items-center gap-3 flex-1 max-w-md">
+              <VoiceSearch
+                searchQuery={searchQuery}
+                onSearchChange={(q) => setSearchQuery(q)}
+                lang={settings.language}
+                isListeningExternal={isVoiceListening}
+                onListeningChange={(l) => setIsVoiceListening(l)}
+                placeholder={settings.language === 'th' ? 'ค้นหาสื่อ...' : 'Search media...'}
+              />
+            </div>
+          )}
+          {allMediaItems.length > 0 && (
+            <div className="flex items-center gap-2.5 shrink-0">
+              <button onClick={() => setIsPlaylistsOpen(true)} className="px-3.5 py-2 rounded-xl bg-white/10 text-white text-xs font-semibold border border-white/10">เพลย์ลิสต์</button>
+              <button onClick={() => setIsServersOpen(true)} className="px-3.5 py-2 rounded-xl bg-white text-black text-xs font-bold">เซิร์ฟเวอร์ ({servers.length})</button>
+              <button onClick={() => setIsSettingsOpen(true)} className="p-2 rounded-xl bg-white/5 text-slate-300 border border-white/5" title="ตั้งค่า Android TV"><SlidersHorizontal className="w-4 h-4" /></button>
+            </div>
+          )}
         </header>
 
         {/* Quick Tune Channel Number Indicator */}
