@@ -35,6 +35,9 @@ jobs:
       - name: TypeScript check
         run: npm run lint
 
+      - name: Run playlist parser tests
+        run: npm test
+
       - name: Build web application
         run: npm run build
 
