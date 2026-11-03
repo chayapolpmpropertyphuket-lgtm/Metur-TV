@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { MediaServerConfig } from '../types';
+import { saveServerCredentials } from '../services/secureVault';
 import {
   Server,
   Plus,
@@ -38,7 +39,7 @@ export const ServersModal: React.FC<ServersModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleTestAndSave = (e: React.FormEvent) => {
+  const handleTestAndSave = async (e: React.FormEvent) => {
     e.preventDefault();
     const normalizedUrl = serverUrl.trim();
     if (!normalizedUrl) return;
@@ -60,13 +61,28 @@ export const ServersModal: React.FC<ServersModalProps> = ({
         itemCount: 0,
       };
 
-      onAddServer(newServer);
-      setTestingStatus('บันทึกแหล่งเซิร์ฟเวอร์แล้ว แต่ยังไม่ได้ทดสอบการเชื่อมต่อจริง');
-      setActiveTab('list');
-      setServerName('');
-      setServerUrl('');
-      setUsername('');
-      setToken('');
+      void (async () => {
+        try {
+          await saveServerCredentials(newServer.id, {
+            username: newServer.username,
+            token: newServer.token,
+          });
+          const safeServer: MediaServerConfig = {
+            ...newServer,
+            username: undefined,
+            token: undefined,
+          };
+          onAddServer(safeServer);
+          setTestingStatus('บันทึกเซิร์ฟเวอร์และเข้ารหัสข้อมูลรับรองในอุปกรณ์แล้ว แต่ยังไม่ได้ทดสอบการเชื่อมต่อจริง');
+          setActiveTab('list');
+          setServerName('');
+          setServerUrl('');
+          setUsername('');
+          setToken('');
+        } catch (vaultError) {
+          setTestingStatus(vaultError instanceof Error ? vaultError.message : 'ไม่สามารถบันทึกข้อมูลรับรองอย่างปลอดภัยได้');
+        }
+      })();
     } catch (error) {
       setTestingStatus(error instanceof Error ? error.message : 'URL ไม่ถูกต้อง');
     }
