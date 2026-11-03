@@ -1,6 +1,7 @@
 package com.meturtv.app;
 
 import android.content.Context;
+import android.os.Build;
 import android.content.SharedPreferences;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
@@ -101,6 +102,9 @@ public final class SecureVaultBridge {
     }
 
     private SecretKey getOrCreateKey() throws Exception {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            throw new IllegalStateException("Android Keystore AES-GCM requires Android 6.0 or later");
+        }
         KeyStore keyStore = KeyStore.getInstance("AndroidKeyStore");
         keyStore.load(null);
         java.security.Key existing = keyStore.getKey(KEY_ALIAS, null);
