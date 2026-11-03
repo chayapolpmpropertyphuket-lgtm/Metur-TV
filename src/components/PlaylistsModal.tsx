@@ -60,6 +60,65 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
   }, [playlistsReady, savedPlaylists]);
   const [selectedPlaylist, setSelectedPlaylist] = useState<PlaylistEntry | null>(null);
 
+  const makePlaylistId = () => {
+    const randomId = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2);
+    return `pl-${Date.now().toString(36)}-${randomId}`;
+  };
+
+  const handleImportFile = async (file: File | undefined, type: 'w3u' | 'm3u') => {
+    if (!file) return;
+    try {
+      const extension = file.name.split('.').pop()?.toLowerCase();
+      const allowed = type === 'w3u' ? ['w3u', 'json'] : ['m3u', 'm3u8'];
+      if (!extension || !allowed.includes(extension)) {
+        throw new Error(type === 'w3u'
+          ? 'กรุณาเลือกไฟล์ .w3u หรือ .json เท่านั้น'
+          : 'กรุณาเลือกไฟล์ .m3u หรือ .m3u8 เท่านั้น');
+      }
+      if (file.size === 0) throw new Error('ไฟล์นี้ไม่มีข้อมูล');
+      if (file.size > 8 * 1024 * 1024) {
+        throw new Error('ไฟล์มีขนาดเกิน 8 MB กรุณาใช้ Playlist ที่มีขนาดเล็กลง');
+      }
+
+      const content = await file.text();
+      if (!content.trim()) throw new Error('ไฟล์นี้ไม่มีเนื้อหา Playlist');
+      const name = playlistName.trim() || file.name.replace(/\.[^.]+$/, '');
+      const parsed = type === 'w3u'
+        ? parseW3U(content, name)
+        : parseM3U(content, name);
+      if (parsed.items.length === 0) {
+        throw new Error('ไม่พบรายการสื่อในไฟล์ หรือโครงสร้าง Playlist ไม่ถูกต้อง');
+      }
+
+      const entry: PlaylistEntry = {
+        id: makePlaylistId(),
+        name,
+        type,
+        source: 'content',
+        itemCount: parsed.items.length,
+        groups: parsed.groups,
+        addedAt: `นำเข้าจากไฟล์ ${file.name}`,
+        items: parsed.items,
+      };
+      setSavedPlaylists((previous) => [entry, ...previous]);
+      setSelectedPlaylist(entry);
+      onImportItems(parsed.items, entry.name);
+      setPlaylistName('');
+      setStatusMessage({
+        text: `นำเข้าไฟล์ ${file.name} สำเร็จ ${parsed.items.length} รายการ`,
+        type: 'success',
+      });
+      setActiveTab('manage');
+    } catch (error) {
+      setStatusMessage({
+        text: error instanceof Error ? error.message : 'ไม่สามารถอ่านไฟล์ Playlist ได้',
+        type: 'error',
+      });
+    }
+  };
+
   const handleImportFromUrl = async (type: 'w3u' | 'm3u') => {
     const sourceUrl = urlInput.trim();
     if (!sourceUrl) {
@@ -107,7 +166,7 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
       }
 
       const entry: PlaylistEntry = {
-        id: `pl-${Date.now()}`,
+        id: makePlaylistId(),
         name,
         type,
         source: 'url',
@@ -141,7 +200,7 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
       const parsed = parseW3U(content, playlistName || 'Wiseplay W3U List');
 
       const newEntry: PlaylistEntry = {
-        id: `pl-${Date.now()}`,
+        id: makePlaylistId(),
         name: playlistName || parsed.playlist.name,
         type: 'w3u',
         source: 'content',
@@ -151,7 +210,7 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
         items: parsed.items,
       };
 
-      setSavedPlaylists([newEntry, ...savedPlaylists]);
+      setSavedPlaylists((previous) => [newEntry, ...previous]);
       setSelectedPlaylist(newEntry);
       onImportItems(parsed.items, newEntry.name);
 
@@ -177,7 +236,7 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
       const parsed = parseM3U(content, playlistName || 'IPTV Playlist');
 
       const newEntry: PlaylistEntry = {
-        id: `pl-${Date.now()}`,
+        id: makePlaylistId(),
         name: playlistName || 'IPTV Playlist',
         type: 'm3u',
         source: 'content',
@@ -187,7 +246,7 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
         items: parsed.items,
       };
 
-      setSavedPlaylists([newEntry, ...savedPlaylists]);
+      setSavedPlaylists((previous) => [newEntry, ...previous]);
       setSelectedPlaylist(newEntry);
       onImportItems(parsed.items, newEntry.name);
 
@@ -507,6 +566,21 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
             </div>
 
             <div className="flex flex-col gap-2 p-3 rounded-xl bg-white/[0.03] border border-white/10">
+              <label className="text-xs font-medium text-slate-300">นำเข้าไฟล์ W3U จากอุปกรณ์</label>
+              <input
+                type="file"
+                accept=".w3u,.json,application/json,text/plain"
+                aria-label="เลือกไฟล์ W3U หรือ JSON"
+                onChange={(event) => {
+                  const selectedFile = event.currentTarget.files?.[0];
+                  void handleImportFile(selectedFile, 'w3u');
+                  event.currentTarget.value = '';
+                }}
+                className="w-full text-xs text-slate-300 file:mr-3 file:rounded-lg file:border-0 file:bg-white file:px-3 file:py-2 file:text-xs file:font-semibold file:text-black focus:outline-none focus:ring-2 focus:ring-cyan-400"
+              />
+            </div>
+
+            <div className="flex flex-col gap-2 p-3 rounded-xl bg-white/[0.03] border border-white/10">
               <label className="text-xs font-medium text-slate-300">หรือโหลด W3U จาก URL</label>
               <input
                 type="url"
@@ -559,6 +633,21 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
                 value={playlistName}
                 onChange={(e) => setPlaylistName(e.target.value)}
                 className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-white transition-colors"
+              />
+            </div>
+
+            <div className="flex flex-col gap-2 p-3 rounded-xl bg-white/[0.03] border border-white/10">
+              <label className="text-xs font-medium text-slate-300">นำเข้าไฟล์ M3U / M3U8 จากอุปกรณ์</label>
+              <input
+                type="file"
+                accept=".m3u,.m3u8,audio/x-mpegurl,application/vnd.apple.mpegurl,text/plain"
+                aria-label="เลือกไฟล์ M3U หรือ M3U8"
+                onChange={(event) => {
+                  const selectedFile = event.currentTarget.files?.[0];
+                  void handleImportFile(selectedFile, 'm3u');
+                  event.currentTarget.value = '';
+                }}
+                className="w-full text-xs text-slate-300 file:mr-3 file:rounded-lg file:border-0 file:bg-white file:px-3 file:py-2 file:text-xs file:font-semibold file:text-black focus:outline-none focus:ring-2 focus:ring-cyan-400"
               />
             </div>
 
