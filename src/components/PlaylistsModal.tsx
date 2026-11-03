@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { MediaItem } from '../types';
 import { parseW3U } from '../utils/w3uParser';
 import { parseM3U } from '../utils/m3uParser';
+import { loadPlaylists, savePlaylists, PersistedPlaylist } from '../services/localStore';
 import {
   ListPlus,
   Tv,
@@ -15,16 +16,7 @@ import {
   Layers,
 } from 'lucide-react';
 
-interface PlaylistEntry {
-  id: string;
-  name: string;
-  type: 'w3u' | 'm3u';
-  source: 'url' | 'content';
-  itemCount: number;
-  groups: string[];
-  addedAt: string;
-  items: MediaItem[];
-}
+type PlaylistEntry = PersistedPlaylist;
 
 interface PlaylistsModalProps {
   isOpen: boolean;
@@ -50,6 +42,21 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
 
   // Start empty; users add their own playlist sources.
   const [savedPlaylists, setSavedPlaylists] = useState<PlaylistEntry[]>([]);
+  const [playlistsReady, setPlaylistsReady] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    loadPlaylists()
+      .then((items) => { if (active) setSavedPlaylists(items); })
+      .catch((error) => console.error('[Metur TV] Playlist load failed:', error))
+      .finally(() => { if (active) setPlaylistsReady(true); });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!playlistsReady) return;
+    savePlaylists(savedPlaylists).catch((error) => console.error('[Metur TV] Playlist save failed:', error));
+  }, [playlistsReady, savedPlaylists]);
   const [selectedPlaylist, setSelectedPlaylist] = useState<PlaylistEntry | null>(null);
 
   const handleImportFromUrl = async (type: 'w3u' | 'm3u') => {
