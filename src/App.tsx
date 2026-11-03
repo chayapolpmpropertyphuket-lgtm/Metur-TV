@@ -184,23 +184,25 @@ export default function App() {
     ].join(',');
 
     const getFocusable = (): HTMLElement[] => {
+      // A modal owns navigation while open. Outside a modal, keep off-screen
+      // shelf cards in the candidate set so D-pad movement can scroll to them.
+      const modalRoot = document.querySelector<HTMLElement>('.fixed.inset-0.z-50');
+      const scope: ParentNode = modalRoot || document;
+
       return Array.from(
-        document.querySelectorAll<HTMLElement>(selector)
+        scope.querySelectorAll<HTMLElement>(selector)
       ).filter((el) => {
         if (
           el.getClientRects().length === 0 ||
           getComputedStyle(el).visibility === 'hidden' ||
-          el.closest('[aria-hidden="true"]')
+          el.closest('[aria-hidden="true"]') ||
+          el.closest('[inert]')
         ) return false;
 
-        // Ignore controls visually covered by a modal/overlay. Without this,
-        // the remote can move focus behind an open dialog.
-        const rect = el.getBoundingClientRect();
-        const topmost = document.elementFromPoint(
-          rect.left + rect.width / 2,
-          rect.top + rect.height / 2
-        );
-        return Boolean(topmost && (topmost === el || el.contains(topmost)));
+        // Do not reject off-screen elements: elementFromPoint returns null for
+        // cards outside a horizontal shelf's viewport, which made the remote
+        // appear stuck at the last visible card.
+        return true;
       });
     };
 
