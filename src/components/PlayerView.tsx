@@ -83,10 +83,17 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
     const streamHeaders = item.headers ?? {};
     const hasCustomHeaders = Object.keys(streamHeaders).length > 0;
     const isHlsSource = url.toLowerCase().includes('.m3u8') || item.type === 'channel';
+    const browserBlockedHeaders = Object.keys(streamHeaders).filter((name) =>
+      /^(host|cookie|origin|content-length|connection|referer|user-agent)$/i.test(name)
+    );
 
-    // HTMLVideoElement and native HLS playback cannot attach arbitrary request
-    // headers. Use hls.js for HLS streams when possible, and fail clearly rather
-    // than silently making a request that omits playlist authentication headers.
+    // HTMLVideoElement/native HLS cannot attach arbitrary headers. Browsers also
+    // forbid JavaScript from overriding Referer and User-Agent. Never silently
+    // drop required playlist headers and then report a generic network failure.
+    if (browserBlockedHeaders.length > 0) {
+      setStreamError('สตรีมนี้ต้องใช้ Header ที่เบราว์เซอร์ไม่อนุญาตให้แอปกำหนด (' + browserBlockedHeaders.join(', ') + ') จึงยังเล่นผ่าน WebView ไม่ได้ ต้องใช้ Native Player เพื่อรองรับ Header นี้');
+      return;
+    }
     if (hasCustomHeaders && (!isHlsSource || !Hls.isSupported())) {
       setStreamError('สตรีมนี้ต้องใช้ HTTP Headers เพิ่มเติม แต่อุปกรณ์เล่นวิดีโอแบบ Native ไม่รองรับการส่ง Headers กรุณาใช้ HLS ที่เล่นผ่าน hls.js หรือ URL ที่ไม่ต้องใช้ Headers');
       return;
