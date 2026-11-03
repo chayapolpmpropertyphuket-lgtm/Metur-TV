@@ -321,6 +321,7 @@ export const ServersModal: React.FC<ServersModalProps> = ({
               </button>
               <button
                 type="submit"
+                disabled={isConnecting}
                 className="px-6 py-2.5 rounded-xl bg-white text-black text-xs font-semibold hover:bg-slate-200 transition-colors flex items-center gap-2"
               >
                 <ShieldCheck className="w-4 h-4" />
