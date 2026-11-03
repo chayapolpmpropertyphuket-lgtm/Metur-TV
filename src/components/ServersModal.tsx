@@ -19,7 +19,6 @@ interface ServersModalProps {
   onClose: () => void;
   onAddServer: (server: MediaServerConfig) => void;
   onRemoveServer: (id: string) => void;
-  onSyncServer: (id: string) => void;
 }
 
 export const ServersModal: React.FC<ServersModalProps> = ({
@@ -28,7 +27,6 @@ export const ServersModal: React.FC<ServersModalProps> = ({
   onClose,
   onAddServer,
   onRemoveServer,
-  onSyncServer,
 }) => {
   const [activeTab, setActiveTab] = useState<'list' | 'add'>('list');
   const [serverType, setServerType] = useState<'jellyfin' | 'emby' | 'plex' | 'webdav'>('jellyfin');
@@ -42,31 +40,36 @@ export const ServersModal: React.FC<ServersModalProps> = ({
 
   const handleTestAndSave = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!serverUrl) return;
+    const normalizedUrl = serverUrl.trim();
+    if (!normalizedUrl) return;
 
-    setTestingStatus('กำลังเชื่อมต่อและตรวจสอบโปรโตคอล...');
+    try {
+      const parsedUrl = new URL(normalizedUrl);
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+        throw new Error('รองรับเฉพาะ URL แบบ HTTP หรือ HTTPS');
+      }
 
-    setTimeout(() => {
       const newServer: MediaServerConfig = {
         id: `srv-${Date.now()}`,
-        name: serverName || `${serverType.toUpperCase()} Server`,
+        name: serverName.trim() || `${serverType.toUpperCase()} Server`,
         type: serverType,
-        url: serverUrl,
-        username: username || 'user',
-        token,
-        status: 'connected',
-        itemCount: Math.floor(Math.random() * 2000) + 500,
-        lastSync: 'เพิ่งซิงค์เมื่อสักครู่',
+        url: normalizedUrl.replace(/\/$/, ''),
+        username: username.trim() || undefined,
+        token: token || undefined,
+        status: 'disconnected',
+        itemCount: 0,
       };
 
       onAddServer(newServer);
-      setTestingStatus(null);
+      setTestingStatus('บันทึกแหล่งเซิร์ฟเวอร์แล้ว แต่ยังไม่ได้ทดสอบการเชื่อมต่อจริง');
       setActiveTab('list');
       setServerName('');
       setServerUrl('');
       setUsername('');
       setToken('');
-    }, 800);
+    } catch (error) {
+      setTestingStatus(error instanceof Error ? error.message : 'URL ไม่ถูกต้อง');
+    }
   };
 
   const getServerBadgeColor = (type: string) => {
@@ -173,23 +176,13 @@ export const ServersModal: React.FC<ServersModalProps> = ({
                       <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5 truncate">
                         <span className="font-mono">{srv.url}</span>
                         <span aria-hidden="true">·</span>
-                        <span>{srv.itemCount.toLocaleString()} สื่อ</span>
+                        <span>{srv.itemCount.toLocaleString()} สื่อที่ซิงค์</span>
                       </div>
-                      <span className="text-[11px] text-slate-500 mt-0.5">
-                        {srv.lastSync}
-                      </span>
                     </div>
                   </div>
 
                   {/* Actions */}
                   <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      onClick={() => onSyncServer(srv.id)}
-                      className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
-                      title="ซิงค์ไลบรารีใหม่"
-                    >
-                      <RefreshCw className="w-4 h-4" />
-                    </button>
                     <button
                       onClick={() => onRemoveServer(srv.id)}
                       className="p-2 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
@@ -285,50 +278,7 @@ export const ServersModal: React.FC<ServersModalProps> = ({
               </div>
             </div>
 
-            {/* Direct Connect Presets for Fast Testing */}
-            <div className="flex flex-col gap-2 pt-2">
-              <span className="text-[11px] text-slate-500">หรือทดสอบด้วยค่าจำลองด่วน:</span>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setServerType('jellyfin');
-                    setServerName('My Jellyfin Master');
-                    setServerUrl('http://192.168.1.120:8096');
-                    setUsername('family_tv');
-                  }}
-                  className="text-xs px-2.5 py-1 rounded bg-white/5 text-slate-300 hover:bg-white/10 transition-colors"
-                >
-                  Jellyfin 10.9
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setServerType('emby');
-                    setServerName('Cinema Emby Server');
-                    setServerUrl('http://192.168.1.150:8096');
-                    setUsername('cinema_user');
-                  }}
-                  className="text-xs px-2.5 py-1 rounded bg-white/5 text-slate-300 hover:bg-white/10 transition-colors"
-                >
-                  Emby Premiere
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setServerType('plex');
-                    setServerName('Cloud Plex Library');
-                    setServerUrl('https://plex.mycloud.org:32400');
-                    setUsername('plex_pass');
-                  }}
-                  className="text-xs px-2.5 py-1 rounded bg-white/5 text-slate-300 hover:bg-white/10 transition-colors"
-                >
-                  Plex Cloud
-                </button>
-              </div>
-            </div>
-
-            {/* Test Status Feedback */}
+            {/* Connection status feedback */}
             {testingStatus && (
               <div className="flex items-center gap-2 p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-xs">
                 <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
@@ -350,7 +300,7 @@ export const ServersModal: React.FC<ServersModalProps> = ({
                 className="px-6 py-2.5 rounded-xl bg-white text-black text-xs font-semibold hover:bg-slate-200 transition-colors flex items-center gap-2"
               >
                 <ShieldCheck className="w-4 h-4" />
-                บันทึกและเชื่อมต่อ
+                บันทึกเซิร์ฟเวอร์
               </button>
             </div>
           </form>
