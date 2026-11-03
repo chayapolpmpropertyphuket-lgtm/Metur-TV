@@ -52,7 +52,7 @@ public class MainActivity extends AppCompatActivity {
         mWebView.addJavascriptInterface(new SecureVaultBridge(this), "MeturSecureVault");
         mWebView.addJavascriptInterface(new NativeHttpBridge(mWebView), "MeturNativeHttp");
         mWebView.addJavascriptInterface(new NativePlayerBridge(this), "MeturNativePlayer");
-        mWebView.addJavascriptInterface(new AppControlBridge(), "MeturAppControl");
+        mWebView.addJavascriptInterface(this, "MeturAppControl");
         setContentView(mWebView);
 
         setupWebView();
@@ -248,15 +248,13 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /** Explicit app-exit bridge used only after the web UI has handled Back navigation. */
-    private final class AppControlBridge {
-        @JavascriptInterface
-        public void exitApp() {
-            runOnUiThread(() -> {
-                if (!isFinishing()) {
-                    finish();
-                }
-            });
-        }
+    @JavascriptInterface
+    public void exitApp() {
+        runOnUiThread(() -> {
+            if (!isFinishing()) {
+                finish();
+            }
+        });
     }
 
     private void hideSystemUI() {
