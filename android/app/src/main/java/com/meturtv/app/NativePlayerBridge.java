@@ -18,7 +18,7 @@ public final class NativePlayerBridge {
     }
 
     @JavascriptInterface
-    public void play(String urlText, String title, String headersJson) {
+    public void play(String urlText, String title, String headersJson, String mediaType) {
         try {
             Uri uri = Uri.parse(urlText == null ? "" : urlText);
             String scheme = uri.getScheme();
@@ -49,6 +49,7 @@ public final class NativePlayerBridge {
             intent.putExtra(NativePlayerActivity.EXTRA_URL, uri.toString());
             intent.putExtra(NativePlayerActivity.EXTRA_TITLE, title == null ? "Metur TV" : title);
             intent.putExtra(NativePlayerActivity.EXTRA_HEADERS, safeHeaders.toString());
+            intent.putExtra(NativePlayerActivity.EXTRA_MEDIA_TYPE, mediaType == null ? "stream" : mediaType);
             activity.launchNativePlayer(intent);
         } catch (Exception exception) {
             notifyError("เปิด Native Player ไม่สำเร็จ: " + exception.getMessage());
