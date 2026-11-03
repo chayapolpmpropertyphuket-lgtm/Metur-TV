@@ -430,7 +430,11 @@ export default function App() {
 
           return {
             el,
-            score: primary + secondary * 1.5
+            // Prefer controls in the same semantic group (for example, the
+            // current shelf or channel grid) before crossing into another area.
+            // The large fallback penalty still permits leaving a group at its edge.
+            score: primary + secondary * 1.5 +
+              (active.closest('[data-tv-focus-group]') === el.closest('[data-tv-focus-group]') ? 0 : 10000)
           };
         })
         .filter(
