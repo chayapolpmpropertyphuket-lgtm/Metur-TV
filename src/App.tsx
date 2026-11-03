@@ -303,8 +303,7 @@ export default function App() {
 
       // Handle Back before text-input guards so the remote can always dismiss
       // overlays or leave the app, even while a form field owns focus.
-      const isBack = e.key === 'Escape' || e.key === 'Backspace' ||
-        e.key === 'BrowserBack' || e.keyCode === 4;
+      const isBack = e.key === 'Escape' || e.key === 'BrowserBack' || e.keyCode === 4;
       if (isBack) {
         e.preventDefault();
         e.stopPropagation();
