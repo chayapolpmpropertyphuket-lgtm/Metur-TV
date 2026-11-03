@@ -122,7 +122,6 @@ export async function connectJellyfinOrEmby(
     throw new Error('เซิร์ฟเวอร์ยืนยันตัวตนไม่ครบถ้วน ไม่พบ Access Token หรือ User ID');
   }
 
-  await saveServerCredentials(server.id, { username, token: accessToken });
   const itemsResponse = await nativeRequest<ServerItemsResult>(
     apiUrl(base, `Users/${encodeURIComponent(userId)}/Items?Recursive=true&IncludeItemTypes=Movie,Series,Episode&Fields=Overview,Genres,ProductionYear,RunTimeTicks,ImageTags,BackdropImageTags&SortBy=DateCreated&SortOrder=Descending&Limit=300`),
     'GET',
@@ -135,6 +134,8 @@ export async function connectJellyfinOrEmby(
   const items = (payload.Items ?? [])
     .map((item) => mapServerItem(item, server, accessToken))
     .filter((item): item is MediaItem => item !== null);
+
+  await saveServerCredentials(server.id, { username, token: accessToken });
 
   return {
     server: {
