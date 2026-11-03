@@ -42,10 +42,10 @@ function mapServerItem(raw: Record<string, unknown>, server: MediaServerConfig, 
   const year = Number(raw.ProductionYear ?? 0);
   const poster = raw.ImageTags && typeof raw.ImageTags === 'object'
     && (raw.ImageTags as Record<string, unknown>).Primary
-    ? `${imageBase}/Primary?maxWidth=480`
+    ? `${imageBase}/Primary?maxWidth=480&api_key=${encodeURIComponent(accessToken)}`
     : '';
   const backdrop = Array.isArray(raw.BackdropImageTags) && raw.BackdropImageTags.length
-    ? `${imageBase}/Backdrop/0?maxWidth=1280`
+    ? `${imageBase}/Backdrop/0?maxWidth=1280&api_key=${encodeURIComponent(accessToken)}`
     : poster;
   return {
     id: `${server.id}:${id}`,
@@ -62,7 +62,6 @@ function mapServerItem(raw: Record<string, unknown>, server: MediaServerConfig, 
     serverName: server.name,
     serverId: server.id,
     serverItemId: id,
-    // accessToken intentionally remains in the native vault, never in item metadata.
   };
 }
 
