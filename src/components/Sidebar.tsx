@@ -143,7 +143,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         {/* Navigation list */}
-        <nav className="flex flex-col gap-1.5">
+        <nav data-tv-focus-group="sidebar-navigation" className="flex flex-col gap-1.5">
           {navItems.map((item, index) => {
             const Icon = item.icon;
             const isActive = currentTab === item.id;
