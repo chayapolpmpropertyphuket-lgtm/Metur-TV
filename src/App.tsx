@@ -199,6 +199,59 @@ export default function App() {
   const modalTriggerRef = useRef<HTMLElement | null>(null);
   const modalWasOpenRef = useRef(false);
 
+  // Root-level BACK requires a deliberate double press within a short window.
+  const exitPromptTimeoutRef = useRef<number | null>(null);
+  const [exitPromptVisible, setExitPromptVisible] = useState(false);
+
+  const clearExitPrompt = () => {
+    if (exitPromptTimeoutRef.current !== null) {
+      window.clearTimeout(exitPromptTimeoutRef.current);
+      exitPromptTimeoutRef.current = null;
+    }
+    setExitPromptVisible(false);
+  };
+
+  const handleBackAction = () => {
+    if (playingItem) return;
+    if (detailsItem) {
+      setDetailsItem(null);
+      return;
+    }
+    if (isServersOpen || isPlaylistsOpen || isSettingsOpen) {
+      setIsServersOpen(false);
+      setIsPlaylistsOpen(false);
+      setIsSettingsOpen(false);
+      return;
+    }
+    if (currentTab !== 'home') {
+      clearExitPrompt();
+      setCurrentTab('home');
+      window.setTimeout(() => {
+        document.querySelector<HTMLElement>('[data-tv-nav="home"]')?.focus();
+      }, 50);
+      return;
+    }
+
+    if (exitPromptTimeoutRef.current !== null) {
+      clearExitPrompt();
+      const appControl = (window as any).MeturAppControl;
+      if (appControl && typeof appControl.exitApp === 'function') {
+        appControl.exitApp();
+      }
+      return;
+    }
+
+    setExitPromptVisible(true);
+    exitPromptTimeoutRef.current = window.setTimeout(() => {
+      exitPromptTimeoutRef.current = null;
+      setExitPromptVisible(false);
+    }, 2200);
+  };
+
+  useEffect(() => () => {
+    if (exitPromptTimeoutRef.current !== null) window.clearTimeout(exitPromptTimeoutRef.current);
+  }, []);
+
   // Quick search / filter & Voice Search
   const [searchQuery, setSearchQuery] = useState('');
   const [isVoiceListening, setIsVoiceListening] = useState(false);
@@ -483,30 +536,12 @@ export default function App() {
         e.preventDefault();
         e.stopPropagation();
 
-        if (playingItem) return;
-        if (detailsItem) {
-          setDetailsItem(null);
-          return;
-        }
-        if (isServersOpen || isPlaylistsOpen || isSettingsOpen) {
-          setIsServersOpen(false);
-          setIsPlaylistsOpen(false);
-          setIsSettingsOpen(false);
-          // The modal focus lifecycle restores the exact trigger control.
-          return;
-        }
-        if (currentTab !== 'home') {
-          setCurrentTab('home');
-          window.setTimeout(() => {
-            document.querySelector<HTMLElement>('[data-tv-nav="home"]')?.focus();
-          }, 50);
-          return;
-        }
-
-        // Home is the root of the app. BACK must not terminate the launcher
-        // activity accidentally; use the Android Home key to leave the app.
+        handleBackAction();
         return;
       }
+
+      // Any other remote action cancels the pending exit confirmation.
+      if (exitPromptTimeoutRef.current !== null) clearExitPrompt();
 
       if (
         active instanceof HTMLInputElement ||
@@ -631,6 +666,7 @@ export default function App() {
     liveChannels,
     settings.quickChannelTuning,
     currentTab,
+    handleBackAction,
   ]);
 
 
@@ -657,14 +693,7 @@ export default function App() {
   };
   const handleRemoteBack = () => {
     if (playingItem) setPlayingItem(null);
-    else if (detailsItem) setDetailsItem(null);
-    else if (isServersOpen || isPlaylistsOpen || isSettingsOpen) {
-      setIsServersOpen(false);
-      setIsPlaylistsOpen(false);
-      setIsSettingsOpen(false);
-    } else {
-      setCurrentTab('home');
-    }
+    else handleBackAction();
   };
   const handleRemoteHome = () => {
     setPlayingItem(null);
@@ -746,7 +775,7 @@ export default function App() {
   };
 
   return (
-    <div className="relative min-h-screen bg-[#050608] text-slate-100 flex overflow-x-hidden">
+    <div className="relative min-h-screen bg-[#080B1A] text-slate-100 flex overflow-x-hidden">
       {/* 1. Ambient Background reacting to current focused poster */}
       <BackdropAmbient
         backdropUrl={focusedItem?.backdrop || focusedItem?.poster}
@@ -1281,6 +1310,15 @@ export default function App() {
         onPlay={(item) => startPlaying(item)}
         onToggleFavorite={handleToggleFavorite}
       />
+
+      {exitPromptVisible && !playingItem && (
+        <div role="status" aria-live="assertive"
+          className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[120] flex items-center gap-3 rounded-2xl border border-cyan-300/30 bg-[#10152B]/95 px-6 py-4 shadow-[0_0_36px_rgba(99,102,241,0.28)] backdrop-blur-xl">
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-cyan-400 text-white font-bold">M</span>
+          <span className="text-base font-semibold text-white">กด BACK อีกครั้งเพื่อออก</span>
+          <span className="h-1.5 w-1.5 rounded-full bg-cyan-300 animate-pulse" />
+        </div>
+      )}
 
       {/* 6. Virtual Remote Controller for testing Android TV D-Pad directly */}
       <VirtualRemote
