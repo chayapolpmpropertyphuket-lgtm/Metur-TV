@@ -48,6 +48,7 @@ public class MainActivity extends AppCompatActivity {
         mWebView = new WebView(this);
         mWebView.setBackgroundColor(Color.BLACK);
         mWebView.addJavascriptInterface(new SecureVaultBridge(this), "MeturSecureVault");
+        mWebView.addJavascriptInterface(new NativeHttpBridge(), "MeturNativeHttp");
         setContentView(mWebView);
 
         setupWebView();
