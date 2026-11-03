@@ -29,6 +29,7 @@ public final class NativePlayerActivity extends AppCompatActivity {
     public static final String EXTRA_URL = "metur.player.url";
     public static final String EXTRA_TITLE = "metur.player.title";
     public static final String EXTRA_HEADERS = "metur.player.headers";
+    public static final String EXTRA_MEDIA_TYPE = "metur.player.media_type";
 
     private ExoPlayer player;
     private PlayerView playerView;
@@ -69,7 +70,8 @@ public final class NativePlayerActivity extends AppCompatActivity {
         MediaItem.Builder mediaBuilder = new MediaItem.Builder()
                 .setUri(Uri.parse(url))
                 .setMediaId(title == null ? "Metur TV" : title);
-        if (url.toLowerCase(java.util.Locale.ROOT).contains(".m3u8")) {
+        String mediaType = getIntent().getStringExtra(EXTRA_MEDIA_TYPE);
+        if ("channel".equals(mediaType) || url.toLowerCase(java.util.Locale.ROOT).contains(".m3u8")) {
             mediaBuilder.setMimeType(androidx.media3.common.MimeTypes.APPLICATION_M3U8);
         }
         player.setMediaItem(mediaBuilder.build());
