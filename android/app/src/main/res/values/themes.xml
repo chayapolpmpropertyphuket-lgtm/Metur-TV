@@ -5,7 +5,7 @@
         <item name="android:windowActionBar">false</item>
         <item name="android:windowFullscreen">true</item>
         <item name="android:windowContentOverlay">@null</item>
-        <item name="android:windowBackground">#080B1A</item>
+        <item name="android:windowBackground">@drawable/metur_splash</item>
     </style>
 
     <style name="Theme.MeturTV.Fullscreen" parent="Theme.MeturTV">
