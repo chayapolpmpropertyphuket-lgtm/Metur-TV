@@ -20,7 +20,8 @@ import { ChannelGuide } from './components/ChannelGuide';
 import { VirtualRemote } from './components/VirtualRemote';
 import { VoiceSearch } from './components/VoiceSearch';
 import { loadAppState, saveAppState } from './services/localStore';
-import { deleteServerCredentials } from './services/secureVault';
+import { deleteServerCredentials, getServerCredential } from './services/secureVault';
+import { buildAuthenticatedStreamUrl, connectJellyfinOrEmby } from './services/mediaServerClient';
 import {
   Server,
   ListPlus,
@@ -44,6 +45,7 @@ export default function App() {
 
   // Media Collections
   const [featuredItems, setFeaturedItems] = useState<MediaItem[]>([]);
+  const [serverItems, setServerItems] = useState<MediaItem[]>([]);
   const [continueWatching, setContinueWatching] = useState<MediaItem[]>([]);
   const [liveChannels, setLiveChannels] = useState<MediaItem[]>([]);
 
@@ -115,7 +117,7 @@ export default function App() {
   }, [storageReady, settings, servers, w3uItems, continueWatching, liveChannels, featuredItems, watchHistory]);
 
   // Compute all favorites
-  const allMediaItems = [...featuredItems, ...liveChannels, ...w3uItems, ...continueWatching];
+  const allMediaItems = [...featuredItems, ...serverItems, ...liveChannels, ...w3uItems, ...continueWatching];
   const favoriteItems = allMediaItems.filter((item, index, self) =>
     item.isFavorite && self.findIndex((i) => i.id === item.id) === index
   );
@@ -128,6 +130,7 @@ export default function App() {
       list.map((item) => (item.id === targetItem.id ? { ...item, isFavorite: updatedStatus } : item));
 
     setFeaturedItems(updateList);
+    setServerItems(updateList);
     setLiveChannels(updateList);
     setW3uItems(updateList);
     setContinueWatching(updateList);
@@ -141,13 +144,31 @@ export default function App() {
     }
   };
 
-  // Start Playing Item with history tracking
-  const startPlaying = (item: MediaItem) => {
-    setPlayingItem(item);
-    // Add to history
+  // Start playback. Server access tokens are added only at playback time and
+  // never stored in the persistent watch-history record.
+  const startPlaying = async (item: MediaItem) => {
+    let playableItem = item;
+    if (item.serverId) {
+      const server = servers.find((entry) => entry.id === item.serverId);
+      if (!server) {
+        console.error('[Metur TV] Server metadata is missing for this item');
+        return;
+      }
+      try {
+        const streamUrl = await buildAuthenticatedStreamUrl(item, server);
+        playableItem = { ...item, streamUrl };
+      } catch (error) {
+        console.error('[Metur TV] Could not prepare authenticated playback:', error);
+        return;
+      }
+    }
+    setPlayingItem(playableItem);
     setWatchHistory((prev) => {
-      const filtered = prev.filter((i) => i.id !== item.id);
-      return [{ ...item, lastWatchedAt: Date.now() }, ...filtered];
+      const filtered = prev.filter((entry) => entry.id !== item.id);
+      const safeHistoryItem = item.serverId
+        ? { ...item, poster: '', backdrop: '', streamUrl: '' }
+        : item;
+      return [{ ...safeHistoryItem, lastWatchedAt: Date.now() }, ...filtered];
     });
   };
 
@@ -434,9 +455,25 @@ export default function App() {
     setW3uItems((prev) => [...newItems, ...prev]);
   };
 
-  // Add Server handler
-  const handleAddServer = (newServer: MediaServerConfig) => {
-    setServers((prev) => [newServer, ...prev]);
+  // Add a server only after the modal has completed the real connection attempt.
+  const handleAddServer = (newServer: MediaServerConfig, items: MediaItem[]) => {
+    setServers((prev) => [newServer, ...prev.filter((server) => server.id !== newServer.id)]);
+    setServerItems((prev) => [...items, ...prev.filter((item) => item.serverId !== newServer.id)]);
+  };
+
+  const handleConnectServer = async (server: MediaServerConfig) => {
+    try {
+      const username = await getServerCredential(server.id, 'username') ?? '';
+      const token = await getServerCredential(server.id, 'token') ?? '';
+      const result = await connectJellyfinOrEmby(server, username, token);
+      setServers((prev) => prev.map((entry) => entry.id === server.id ? result.server : entry));
+      setServerItems((prev) => [...result.items, ...prev.filter((item) => item.serverId !== server.id)]);
+    } catch (error) {
+      setServers((prev) => prev.map((entry) => entry.id === server.id
+        ? { ...entry, status: 'error', itemCount: 0 }
+        : entry));
+      console.error('[Metur TV] Server connection failed:', error);
+    }
   };
 
   const handleRemoveServer = (id: string) => {
@@ -444,6 +481,7 @@ export default function App() {
       console.error('[Metur TV] Could not clear encrypted credentials:', error);
     }).finally(() => {
       setServers((prev) => prev.filter((server) => server.id !== id));
+      setServerItems((prev) => prev.filter((item) => item.serverId !== id));
     });
   };
 
@@ -731,7 +769,7 @@ export default function App() {
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-5 pt-2">
-              {[...featuredItems.filter((i) => i.type === 'movie'), ...w3uItems].map((item) => (
+              {[...featuredItems.filter((i) => i.type === 'movie'), ...serverItems.filter((i) => i.type === 'movie'), ...w3uItems].map((item) => (
                 <div
                   key={item.id}
                   onClick={() => startPlaying(item)}
@@ -790,7 +828,7 @@ export default function App() {
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-5 pt-2">
-              {featuredItems
+              {[...featuredItems, ...serverItems]
                 .filter((i) => i.type === 'series' || i.type === 'episode')
                 .map((item) => (
                   <div
@@ -980,6 +1018,7 @@ export default function App() {
         isOpen={isServersOpen}
         onClose={() => setIsServersOpen(false)}
         onAddServer={handleAddServer}
+        onConnectServer={handleConnectServer}
         onRemoveServer={handleRemoveServer}
       />
 
