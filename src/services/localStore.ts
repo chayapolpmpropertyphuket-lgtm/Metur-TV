@@ -4,6 +4,7 @@ import { deleteSecureValue, getSecureValue, putSecureValue } from './secureVault
 const DB_NAME = 'metur-tv-local';
 const DB_VERSION = 1;
 const STORE_NAME = 'app-state';
+let secureWriteSequence = 0;
 
 export interface PersistedPlaylist {
   id: string;
@@ -97,8 +98,11 @@ function hasSensitiveStreamData(item: MediaItem): boolean {
 }
 
 function makeSecureRef(namespace: string, index: number): string {
-  const safeNamespace = namespace.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 90);
-  return `media:${safeNamespace}:${index}`;
+  const safeNamespace = namespace.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 65);
+  // Use a fresh reference for each write. This keeps the previous encrypted value
+  // intact until the IndexedDB transaction commits successfully.
+  secureWriteSequence += 1;
+  return `media:${safeNamespace}:${Date.now().toString(36)}:${secureWriteSequence}:${index}`;
 }
 
 async function serializeItems(namespace: string, items: MediaItem[]): Promise<StoredMediaItem[]> {
