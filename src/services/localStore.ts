@@ -6,6 +6,7 @@ const DB_VERSION = 1;
 const STORE_NAME = 'app-state';
 let secureWriteSequence = 0;
 let playlistSaveQueue: Promise<void> = Promise.resolve();
+let appStateSaveQueue: Promise<void> = Promise.resolve();
 
 export interface PersistedPlaylist {
   id: string;
@@ -294,14 +295,30 @@ export function savePlaylists(playlists: PersistedPlaylist[]): Promise<void> {
   return saveTask;
 }
 
-export async function saveAppState(state: PersistedAppState): Promise<void> {
-  const db = await openDatabase();
-  try {
-    const previous = await readRecord<StoredAppState>(db, 'root');
-    const stored = await serializeAppState(state);
-    await writeRecord(db, 'root', stored);
-    await removeStaleSecureValues(previous, stored);
-  } finally {
-    db.close();
-  }
+export function saveAppState(state: PersistedAppState): Promise<void> {
+  // Preserve snapshot order so older overlapping saves cannot delete secure
+  // media references that a newer root-state snapshot still needs.
+  const snapshot: PersistedAppState = {
+    ...state,
+    settings: { ...state.settings },
+    servers: state.servers.map((server) => ({ ...server })),
+    w3uItems: state.w3uItems.map((item) => ({ ...item, headers: item.headers ? { ...item.headers } : undefined })),
+    continueWatching: state.continueWatching.map((item) => ({ ...item, headers: item.headers ? { ...item.headers } : undefined })),
+    liveChannels: state.liveChannels.map((item) => ({ ...item, headers: item.headers ? { ...item.headers } : undefined })),
+    featuredItems: state.featuredItems.map((item) => ({ ...item, headers: item.headers ? { ...item.headers } : undefined })),
+    watchHistory: state.watchHistory.map((item) => ({ ...item, headers: item.headers ? { ...item.headers } : undefined })),
+  };
+  const saveTask = appStateSaveQueue.catch(() => undefined).then(async () => {
+    const db = await openDatabase();
+    try {
+      const previous = await readRecord<StoredAppState>(db, 'root');
+      const stored = await serializeAppState(snapshot);
+      await writeRecord(db, 'root', stored);
+      await removeStaleSecureValues(previous, stored);
+    } finally {
+      db.close();
+    }
+  });
+  appStateSaveQueue = saveTask;
+  return saveTask;
 }
