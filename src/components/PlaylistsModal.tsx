@@ -92,12 +92,15 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
 
       const content = response.body;
       if (!content.trim()) throw new Error('เซิร์ฟเวอร์ตอบกลับเป็นไฟล์ว่าง');
+      if (/^\s*<(?:!doctype\s+html|html|head|body)\b/i.test(content)) {
+        throw new Error('URL นี้ส่งหน้าเว็บ HTML กลับมา ไม่ใช่ไฟล์ Playlist (อาจต้องใช้ลิงก์ดาวน์โหลดโดยตรงหรือเข้าสู่ระบบก่อน)');
+      }
       let nameFromUrl = parsedUrl.pathname.split('/').pop() || 'Remote Playlist';
       try { nameFromUrl = decodeURIComponent(nameFromUrl); } catch { /* Keep the encoded filename. */ }
       const name = playlistName.trim() || nameFromUrl;
       const parsed = type === 'w3u'
-        ? parseW3U(content, name)
-        : parseM3U(content, name);
+        ? parseW3U(content, name, parsedUrl.toString())
+        : parseM3U(content, name, parsedUrl.toString());
 
       if (parsed.items.length === 0) {
         throw new Error('ไม่พบรายการสื่อใน Playlist หรือรูปแบบไฟล์ไม่ตรงกับประเภทที่เลือก');
