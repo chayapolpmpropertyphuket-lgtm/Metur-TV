@@ -10,7 +10,7 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "build:apk": "bash ./build-apk.sh",
-    "test": "tsx --test tests/**/*.test.ts"
+    "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -37,4 +37,4 @@
     "typescript": "^7.0.2",
     "@types/express": "^4.17.21"
   }
-}\n
+}
