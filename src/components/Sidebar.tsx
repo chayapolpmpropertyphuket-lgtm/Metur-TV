@@ -137,6 +137,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             return (
               <button
                 key={item.id}
+                data-tv-nav={item.id}
                 onClick={() => onSelectTab(item.id)}
                 className={`relative flex items-center gap-3.5 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 text-left outline-none ${
                   isActive
