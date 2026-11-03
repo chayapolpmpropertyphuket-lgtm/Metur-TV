@@ -620,7 +620,7 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
                         </button>
                       )}
                       <button
-                        onClick={() => handleExportPlaylist(selectedPlaylist)
+                        onClick={() => handleExportPlaylist(selectedPlaylist)}
                         className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white text-xs flex items-center gap-1 border border-white/5 transition-colors"
                         title="ส่งออกเพลย์ลิสต์นี้เป็นไฟล์"
                       >
