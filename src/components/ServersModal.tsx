@@ -61,28 +61,22 @@ export const ServersModal: React.FC<ServersModalProps> = ({
         itemCount: 0,
       };
 
-      void (async () => {
-        try {
-          await saveServerCredentials(newServer.id, {
-            username: newServer.username,
-            token: newServer.token,
-          });
-          const safeServer: MediaServerConfig = {
-            ...newServer,
-            username: undefined,
-            token: undefined,
-          };
-          onAddServer(safeServer);
-          setTestingStatus('บันทึกเซิร์ฟเวอร์และเข้ารหัสข้อมูลรับรองในอุปกรณ์แล้ว แต่ยังไม่ได้ทดสอบการเชื่อมต่อจริง');
-          setActiveTab('list');
-          setServerName('');
-          setServerUrl('');
-          setUsername('');
-          setToken('');
-        } catch (vaultError) {
-          setTestingStatus(vaultError instanceof Error ? vaultError.message : 'ไม่สามารถบันทึกข้อมูลรับรองอย่างปลอดภัยได้');
-        }
-      })();
+      await saveServerCredentials(newServer.id, {
+        username: newServer.username,
+        token: newServer.token,
+      });
+      const safeServer: MediaServerConfig = {
+        ...newServer,
+        username: undefined,
+        token: undefined,
+      };
+      onAddServer(safeServer);
+      setTestingStatus('บันทึกเซิร์ฟเวอร์และเข้ารหัสข้อมูลรับรองในอุปกรณ์แล้ว แต่ยังไม่ได้ทดสอบการเชื่อมต่อจริง');
+      setActiveTab('list');
+      setServerName('');
+      setServerUrl('');
+      setUsername('');
+      setToken('');
     } catch (error) {
       setTestingStatus(error instanceof Error ? error.message : 'URL ไม่ถูกต้อง');
     }
