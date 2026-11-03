@@ -61,7 +61,23 @@ export default function App() {
   const [diagnosticsEnabled, setDiagnosticsEnabled] = useState(
     () => localStorage.getItem('metur_diagnostics_enabled') === 'true'
   );
-  const [diagnosticEvents, setDiagnosticEvents] = useState<Array<Record<string, unknown>>>([]);
+  const [diagnosticEvents, setDiagnosticEvents] = useState<Array<Record<string, unknown>>>(() => {
+    try {
+      const saved = localStorage.getItem('metur_diagnostics_events');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    if (!diagnosticsEnabled) return;
+    try {
+      localStorage.setItem('metur_diagnostics_events', JSON.stringify(diagnosticEvents.slice(-500)));
+    } catch {
+      // Diagnostics must never interrupt normal TV playback or navigation.
+    }
+  }, [diagnosticsEnabled, diagnosticEvents]);
 
   useEffect(() => {
     if (!diagnosticsEnabled) return;
