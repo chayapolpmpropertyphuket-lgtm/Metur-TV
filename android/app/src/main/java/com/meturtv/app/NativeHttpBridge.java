@@ -1,6 +1,7 @@
 package com.meturtv.app;
 
 import android.webkit.JavascriptInterface;
+import android.webkit.WebView;
 
 import org.json.JSONObject;
 
@@ -11,15 +12,33 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.Iterator;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
-/** HTTP client for user-configured media servers. Runs off the WebView UI thread. */
+/** Asynchronous HTTP bridge: network I/O never blocks the WebView JavaScript thread. */
 public final class NativeHttpBridge {
     private static final int CONNECT_TIMEOUT_MS = 10000;
     private static final int READ_TIMEOUT_MS = 20000;
     private static final int MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
+    private final WebView webView;
+    private final ExecutorService executor = Executors.newFixedThreadPool(3);
+
+    public NativeHttpBridge(WebView webView) {
+        this.webView = webView;
+    }
 
     @JavascriptInterface
-    public String request(String urlText, String method, String headersJson, String body) {
+    public void request(String requestId, String urlText, String method, String headersJson, String body) {
+        if (requestId == null || !requestId.matches("[A-Za-z0-9_-]{1,80}")) return;
+        executor.execute(() -> {
+            String result = performRequest(urlText, method, headersJson, body);
+            String script = "window.__meturHttpResolve && window.__meturHttpResolve("
+                    + JSONObject.quote(requestId) + "," + JSONObject.quote(result) + ");";
+            webView.post(() -> webView.evaluateJavascript(script, null));
+        });
+    }
+
+    private String performRequest(String urlText, String method, String headersJson, String body) {
         HttpURLConnection connection = null;
         try {
             URL url = new URL(urlText);
@@ -30,12 +49,10 @@ public final class NativeHttpBridge {
             if (url.getUserInfo() != null || url.getHost() == null || url.getHost().isEmpty()) {
                 return error(0, "Invalid server URL");
             }
-
-            String verb = method == null ? "GET" : method.toUpperCase();
+            String verb = method == null ? "GET" : method.toUpperCase(java.util.Locale.ROOT);
             if (!"GET".equals(verb) && !"POST".equals(verb) && !"DELETE".equals(verb)) {
                 return error(0, "Unsupported HTTP method");
             }
-
             connection = (HttpURLConnection) url.openConnection();
             connection.setRequestMethod(verb);
             connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
@@ -56,25 +73,20 @@ public final class NativeHttpBridge {
                     connection.setRequestProperty(name, value);
                 }
             }
-
             if ("POST".equals(verb)) {
                 connection.setDoOutput(true);
                 connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
                 byte[] bytes = body == null ? new byte[0] : body.getBytes(StandardCharsets.UTF_8);
                 if (bytes.length > 1024 * 1024) return error(0, "Request body too large");
-                try (OutputStream output = connection.getOutputStream()) {
-                    output.write(bytes);
-                }
+                try (OutputStream output = connection.getOutputStream()) { output.write(bytes); }
             }
-
             int status = connection.getResponseCode();
             InputStream stream = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
             String response = "";
             if (stream != null) {
                 try (InputStream input = stream; ByteArrayOutputStream output = new ByteArrayOutputStream()) {
                     byte[] buffer = new byte[8192];
-                    int total = 0;
-                    int count;
+                    int total = 0, count;
                     while ((count = input.read(buffer)) != -1) {
                         total += count;
                         if (total > MAX_RESPONSE_BYTES) throw new IllegalStateException("Response too large");
