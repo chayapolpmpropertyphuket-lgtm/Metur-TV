@@ -1,9 +1,6 @@
 name: Validate Android TV APK
 
 on:
-  push:
-    branches:
-      - feature/blank-first-run-foundation
   pull_request:
     branches:
       - main
