@@ -63,8 +63,17 @@ public class MainActivity extends AppCompatActivity {
     /** Called by the JavaScript bridge to launch the isolated native media player. */
     public void launchNativePlayer(Intent intent) {
         runOnUiThread(() -> {
-            nativePlayerWasOpened = true;
-            startActivity(intent);
+            try {
+                startActivity(intent);
+                nativePlayerWasOpened = true;
+            } catch (Exception exception) {
+                if (mWebView != null) {
+                    String message = "เปิด Native Player ไม่สำเร็จ: " + exception.getMessage();
+                    mWebView.evaluateJavascript(
+                            "window.__meturNativePlayerError && window.__meturNativePlayerError("
+                                    + org.json.JSONObject.quote(message) + ");", null);
+                }
+            }
         });
     }
 
