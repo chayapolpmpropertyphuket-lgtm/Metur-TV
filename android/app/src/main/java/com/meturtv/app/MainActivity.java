@@ -4,6 +4,11 @@ import android.Manifest;
 import android.content.pm.PackageManager;
 import android.content.Intent;
 import android.net.Uri;
+import android.content.ContentValues;
+import android.os.Environment;
+import android.provider.MediaStore;
+import java.io.OutputStream;
+import java.io.IOException;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
@@ -53,6 +58,7 @@ public class MainActivity extends AppCompatActivity {
         mWebView.addJavascriptInterface(new NativeHttpBridge(mWebView), "MeturNativeHttp");
         mWebView.addJavascriptInterface(new NativePlayerBridge(this), "MeturNativePlayer");
         mWebView.addJavascriptInterface(this, "MeturAppControl");
+        mWebView.addJavascriptInterface(this, "MeturDiagnosticsBridge");
         setContentView(mWebView);
 
         setupWebView();
@@ -245,6 +251,39 @@ public class MainActivity extends AppCompatActivity {
         String script = "window.dispatchEvent(new KeyboardEvent('keydown', { key: '" + keyName
                 + "', bubbles: true, cancelable: true }));";
         mWebView.evaluateJavascript(script, null);
+    }
+
+    /**
+     * Save an opt-in diagnostics JSON report to the public Downloads/Metur TV folder.
+     * MediaStore works on Android 10+ without broad storage permissions.
+     */
+    @JavascriptInterface
+    public String saveReport(String filename, String json) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            return "Android เวอร์ชันนี้ไม่รองรับการบันทึกแบบ Downloads อัตโนมัติ";
+        }
+        String safeName = (filename == null ? "metur-tv-diagnostics.json" : filename)
+                .replaceAll("[^a-zA-Z0-9._-]", "_");
+        if (!safeName.endsWith(".json")) safeName += ".json";
+        ContentValues values = new ContentValues();
+        values.put(MediaStore.Downloads.DISPLAY_NAME, safeName);
+        values.put(MediaStore.Downloads.MIME_TYPE, "application/json");
+        values.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Metur TV");
+        values.put(MediaStore.Downloads.IS_PENDING, 1);
+        Uri uri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+        if (uri == null) return "ไม่สามารถสร้างไฟล์รายงานใน Downloads ได้";
+        try (OutputStream output = getContentResolver().openOutputStream(uri)) {
+            if (output == null) throw new IOException("Output stream unavailable");
+            output.write((json == null ? "{}" : json).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            output.flush();
+            ContentValues complete = new ContentValues();
+            complete.put(MediaStore.Downloads.IS_PENDING, 0);
+            getContentResolver().update(uri, complete, null, null);
+            return "บันทึกรายงานแล้ว: Downloads/Metur TV/" + safeName;
+        } catch (Exception exception) {
+            getContentResolver().delete(uri, null, null);
+            return "บันทึกรายงานไม่สำเร็จ: " + exception.getClass().getSimpleName();
+        }
     }
 
     /** Explicit app-exit bridge used only after the web UI has handled Back navigation. */
