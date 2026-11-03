@@ -24,6 +24,10 @@ interface SettingsModalProps {
   settings: TVSettings;
   onUpdateSettings: (newSettings: Partial<TVSettings>) => void;
   onExportBackup?: () => void;
+  diagnosticsEnabled: boolean;
+  diagnosticEventCount: number;
+  onDiagnosticsToggle: (enabled: boolean) => void;
+  onExportDiagnostics: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -32,6 +36,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   settings,
   onUpdateSettings,
   onExportBackup,
+  diagnosticsEnabled,
+  diagnosticEventCount,
+  onDiagnosticsToggle,
+  onExportDiagnostics,
 }) => {
   const [backupStatus, setBackupStatus] = useState<string | null>(null);
 
@@ -385,6 +393,43 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           )}
         </div>
+
+        {/* Opt-in diagnostics for real Android TV testing */}
+        <section className="flex flex-col gap-3 pt-2">
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+            <ShieldCheck className="w-4 h-4 text-emerald-400" />
+            <span>รายงานการทดสอบ (Diagnostics)</span>
+          </div>
+          <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/5 flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex flex-col gap-1">
+                <span className="text-sm font-medium text-white">อนุญาตเก็บข้อมูลการใช้งานเพื่อวิเคราะห์ปัญหา</span>
+                <span className="text-xs text-slate-400">เก็บเฉพาะปุ่มรีโมท การเปลี่ยนโฟกัส การเลื่อน และชนิดข้อผิดพลาด บันทึกไว้ในหน่วยความจำระหว่างเปิดแอป</span>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={diagnosticsEnabled}
+                onClick={() => onDiagnosticsToggle(!diagnosticsEnabled)}
+                className={`shrink-0 px-3 py-2 rounded-xl text-xs font-semibold ${diagnosticsEnabled ? 'bg-emerald-500 text-black' : 'bg-white/10 text-white'}`}
+              >
+                {diagnosticsEnabled ? 'เปิดอยู่' : 'ปิดอยู่'}
+              </button>
+            </div>
+            <div className="flex items-center justify-between gap-3 pt-2 border-t border-white/5">
+              <span className="text-xs text-slate-400">เหตุการณ์ที่บันทึก: {diagnosticEventCount}</span>
+              <button
+                type="button"
+                onClick={onExportDiagnostics}
+                disabled={diagnosticEventCount === 0}
+                className="px-4 py-2 rounded-xl bg-white text-black text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                ดาวน์โหลดรายงาน JSON
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-500 leading-relaxed">ไม่เก็บรหัสผ่าน โทเคน ข้อความที่กรอก ชื่อสื่อ URL หรือข้อมูลเซิร์ฟเวอร์ รายงานจะถูกสร้างเมื่อคุณกดดาวน์โหลดเท่านั้น</p>
+          </div>
+        </section>
 
         {/* App specs footer */}
         <div className="flex items-center justify-between pt-4 border-t border-white/5 text-xs text-slate-500">
