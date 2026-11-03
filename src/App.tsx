@@ -124,25 +124,143 @@ export default function App() {
     });
   };
 
-  // D-Pad / Remote control key events handler & Number tuning
+
+  // Android TV D-Pad Navigation Engine
   useEffect(() => {
+    const selector = [
+      'button:not(:disabled)',
+      'a[href]',
+      'input:not(:disabled)',
+      'select:not(:disabled)',
+      'textarea:not(:disabled)',
+      '[tabindex]:not([tabindex="-1"])'
+    ].join(',');
+
+    const getFocusable = (): HTMLElement[] => {
+      return Array.from(
+        document.querySelectorAll<HTMLElement>(selector)
+      ).filter((el) => {
+        return (
+          el.getClientRects().length > 0 &&
+          getComputedStyle(el).visibility !== 'hidden' &&
+          !el.closest('[aria-hidden="true"]')
+        );
+      });
+    };
+
+    const moveFocus = (
+      direction: 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight'
+    ) => {
+      const elements = getFocusable();
+      const active = document.activeElement as HTMLElement | null;
+
+      if (!active || active === document.body ||
+          !active.matches(selector)) {
+        const initial =
+          document.querySelector<HTMLElement>(
+            `[data-tv-nav="${currentTab}"]`
+          );
+
+        (initial || elements[0])?.focus();
+        return;
+      }
+
+      const current = active.getBoundingClientRect();
+      const cx = current.left + current.width / 2;
+      const cy = current.top + current.height / 2;
+
+      const candidates = elements
+        .filter((el) => el !== active)
+        .map((el) => {
+          const rect = el.getBoundingClientRect();
+          const x = rect.left + rect.width / 2;
+          const y = rect.top + rect.height / 2;
+
+          const dx = x - cx;
+          const dy = y - cy;
+
+          let primary = 0;
+          let secondary = 0;
+
+          switch (direction) {
+            case 'ArrowLeft':
+              if (dx >= -1) return null;
+              primary = -dx;
+              secondary = Math.abs(dy);
+              break;
+
+            case 'ArrowRight':
+              if (dx <= 1) return null;
+              primary = dx;
+              secondary = Math.abs(dy);
+              break;
+
+            case 'ArrowUp':
+              if (dy >= -1) return null;
+              primary = -dy;
+              secondary = Math.abs(dx);
+              break;
+
+            case 'ArrowDown':
+              if (dy <= 1) return null;
+              primary = dy;
+              secondary = Math.abs(dx);
+              break;
+          }
+
+          return {
+            el,
+            score: primary + secondary * 1.5
+          };
+        })
+        .filter(
+          (item): item is { el: HTMLElement; score: number } =>
+            item !== null
+        )
+        .sort((a, b) => a.score - b.score);
+
+      if (candidates.length > 0) {
+        const next = candidates[0].el;
+
+        next.focus({ preventScroll: true });
+
+        next.scrollIntoView({
+          behavior: 'smooth',
+          block: 'nearest',
+          inline: 'nearest'
+        });
+      } else if (direction === 'ArrowUp') {
+        window.scrollBy({ top: -200, behavior: 'smooth' });
+      } else if (direction === 'ArrowDown') {
+        window.scrollBy({ top: 200, behavior: 'smooth' });
+      }
+    };
+
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (playingItem) return;
+
+      const active = document.activeElement;
+
       if (
-        playingItem ||
-        e.target instanceof HTMLInputElement ||
-        e.target instanceof HTMLTextAreaElement
+        active instanceof HTMLInputElement ||
+        active instanceof HTMLTextAreaElement ||
+        active instanceof HTMLSelectElement ||
+        (active instanceof HTMLElement && active.isContentEditable)
       ) {
         return;
       }
 
-      // Quick channel tuning with numbers 0-9
+      // Quick channel tuning
       if (settings.quickChannelTuning && /^[0-9]$/.test(e.key)) {
         e.preventDefault();
+
         const num = e.key;
         setQuickTuneNumber(num);
 
         const targetChannel = liveChannels.find(
-          (ch) => ch.channelNumber === num || ch.channelNumber === `0${num}`
+          (ch) =>
+            ch.channelNumber === num ||
+            ch.channelNumber === `0${num}`
         );
 
         if (targetChannel) {
@@ -153,37 +271,86 @@ export default function App() {
         } else {
           setTimeout(() => setQuickTuneNumber(null), 1500);
         }
+
         return;
       }
 
-      switch (e.key) {
-        case 'ArrowUp':
-          e.preventDefault();
-          window.scrollBy({ top: -220, behavior: 'smooth' });
-          break;
-        case 'ArrowDown':
-          e.preventDefault();
-          window.scrollBy({ top: 220, behavior: 'smooth' });
-          break;
-        case 'Escape':
-          if (isServersOpen || isPlaylistsOpen || isSettingsOpen || detailsItem) {
-            setIsServersOpen(false);
-            setIsPlaylistsOpen(false);
-            setIsSettingsOpen(false);
-            setDetailsItem(null);
-          }
-          break;
-        case 'Enter':
-          if (!isServersOpen && !isPlaylistsOpen && !isSettingsOpen && !detailsItem) {
-            startPlaying(focusedItem);
-          }
-          break;
+      // Four-direction navigation
+      if (
+        e.key === 'ArrowUp' ||
+        e.key === 'ArrowDown' ||
+        e.key === 'ArrowLeft' ||
+        e.key === 'ArrowRight'
+      ) {
+        e.preventDefault();
+        moveFocus(e.key);
+        return;
+      }
+
+      // Select focused element
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+
+        const focused = document.activeElement as HTMLElement;
+
+        if (
+          focused &&
+          focused !== document.body &&
+          focused.matches(selector)
+        ) {
+          focused.click();
+        } else {
+          document
+            .querySelector<HTMLElement>(
+              `[data-tv-nav="${currentTab}"]`
+            )
+            ?.focus();
+        }
+
+        return;
+      }
+
+      // Back button
+      if (e.key === 'Escape') {
+        if (isServersOpen || isPlaylistsOpen ||
+            isSettingsOpen || detailsItem) {
+          setIsServersOpen(false);
+          setIsPlaylistsOpen(false);
+          setIsSettingsOpen(false);
+          setDetailsItem(null);
+        }
       }
     };
 
+    // Initial focus on active sidebar item
+    const initialTimer = window.setTimeout(() => {
+      if (document.activeElement === document.body) {
+        document
+          .querySelector<HTMLElement>(
+            `[data-tv-nav="${currentTab}"]`
+          )
+          ?.focus();
+      }
+    }, 300);
+
     window.addEventListener('keydown', handleGlobalKeyDown);
-    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [playingItem, focusedItem, isServersOpen, isPlaylistsOpen, isSettingsOpen, detailsItem, liveChannels, settings.quickChannelTuning]);
+
+    return () => {
+      window.clearTimeout(initialTimer);
+      window.removeEventListener('keydown', handleGlobalKeyDown);
+    };
+  }, [
+    playingItem,
+    focusedItem,
+    isServersOpen,
+    isPlaylistsOpen,
+    isSettingsOpen,
+    detailsItem,
+    liveChannels,
+    settings.quickChannelTuning,
+    currentTab
+  ]);
+
 
   // Handlers for Virtual TV Remote
   const handleRemoteUp = () => {
