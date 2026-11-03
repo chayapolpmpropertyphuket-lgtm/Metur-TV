@@ -461,6 +461,7 @@ export default function App() {
   };
 
   const handleConnectServer = async (server: MediaServerConfig) => {
+    setServers((prev) => prev.map((entry) => entry.id === server.id ? { ...entry, status: 'connecting' } : entry));
     try {
       const username = await getServerCredential(server.id, 'username') ?? '';
       const token = await getServerCredential(server.id, 'token') ?? '';
