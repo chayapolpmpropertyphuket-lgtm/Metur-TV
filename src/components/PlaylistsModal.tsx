@@ -84,7 +84,7 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
 
       const entry: PlaylistEntry = {
         id: `pl-${Date.now()}`,
-        name: type === 'w3u' ? parsed.playlist.name : name,
+        name,
         type,
         source: 'url',
         itemCount: parsed.items.length,
