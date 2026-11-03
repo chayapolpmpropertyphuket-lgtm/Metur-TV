@@ -2,6 +2,8 @@ package com.meturtv.app;
 
 import android.Manifest;
 import android.content.pm.PackageManager;
+import android.content.Intent;
+import android.net.Uri;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
@@ -13,6 +15,7 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import androidx.webkit.WebViewAssetLoader;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
@@ -26,6 +29,7 @@ import androidx.core.content.ContextCompat;
 public class MainActivity extends AppCompatActivity {
 
     private WebView mWebView;
+    private WebViewAssetLoader assetLoader;
     private static final int RECORD_AUDIO_PERMISSION_REQUEST = 101;
     private PermissionRequest mCurrentPermissionRequest;
 
@@ -37,6 +41,10 @@ public class MainActivity extends AppCompatActivity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         hideSystemUI();
 
+        assetLoader = new WebViewAssetLoader.Builder()
+                .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(this))
+                .build();
+
         mWebView = new WebView(this);
         mWebView.setBackgroundColor(Color.BLACK);
         setContentView(mWebView);
@@ -45,7 +53,7 @@ public class MainActivity extends AppCompatActivity {
         checkPermissions();
 
         // Load local bundled dist or remote dev server
-        mWebView.loadUrl("file:///android_asset/dist/index.html");
+        mWebView.loadUrl("https://appassets.androidplatform.net/assets/dist/index.html");
     }
 
     private void setupWebView() {
@@ -54,22 +62,39 @@ public class MainActivity extends AppCompatActivity {
         settings.setDomStorageEnabled(true);
         settings.setDatabaseEnabled(true);
         settings.setMediaPlaybackRequiresUserGesture(false);
-        settings.setAllowFileAccess(true);
-        settings.setAllowContentAccess(true);
-        settings.setAllowFileAccessFromFileURLs(true);
-        settings.setAllowUniversalAccessFromFileURLs(true);
+        settings.setAllowFileAccess(false);
+        settings.setAllowContentAccess(false);
+        settings.setAllowFileAccessFromFileURLs(false);
+        settings.setAllowUniversalAccessFromFileURLs(false);
         settings.setUseWideViewPort(true);
         settings.setLoadWithOverviewMode(true);
         settings.setSupportZoom(false);
-        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
 
         // Enable hardware rendering
         mWebView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
 
         mWebView.setWebViewClient(new WebViewClient() {
             @Override
-            public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                view.loadUrl(url);
+            public android.webkit.WebResourceResponse shouldInterceptRequest(
+                    WebView view, android.webkit.WebResourceRequest request) {
+                return assetLoader.shouldInterceptRequest(request.getUrl());
+            }
+
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, android.webkit.WebResourceRequest request) {
+                Uri uri = request.getUrl();
+                if ("appassets.androidplatform.net".equals(uri.getHost())
+                        && "https".equals(uri.getScheme())) {
+                    return false;
+                }
+                if ("https".equals(uri.getScheme()) || "http".equals(uri.getScheme())) {
+                    try {
+                        startActivity(new Intent(Intent.ACTION_VIEW, uri));
+                    } catch (Exception ignored) {
+                        // Never navigate the trusted WebView to an external origin.
+                    }
+                }
                 return true;
             }
         });
