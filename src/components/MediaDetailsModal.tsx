@@ -28,7 +28,7 @@ export const MediaDetailsModal: React.FC<MediaDetailsModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-2xl">
+    <div data-tv-modal="true" data-tv-focus-group="modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-2xl">
       <div className="relative w-full max-w-3xl bg-[#090b10] border border-white/10 rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
         {/* Backdrop Header */}
         <div className="relative w-full h-64 md:h-72 overflow-hidden shrink-0">

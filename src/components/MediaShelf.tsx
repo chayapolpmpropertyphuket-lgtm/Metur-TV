@@ -96,6 +96,8 @@ export const MediaShelf: React.FC<MediaShelfProps> = ({
       {/* Horizontal Cards Shelf */}
       <div
         ref={scrollContainerRef}
+        data-tv-focus-group="media-shelf"
+        aria-label={title}
         className="flex items-center gap-5 overflow-x-auto no-scrollbar py-3 px-2 scroll-smooth"
         style={{
           scrollSnapType: 'x mandatory',

@@ -1,14 +1,17 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { MediaItem } from '../types';
-import { parseW3U } from '../utils/w3uParser';
-import { parseM3U } from '../utils/m3uParser';
-import { SAMPLE_W3U_CONTENT, SAMPLE_M3U_CONTENT } from '../data/sampleData';
+import { loadPlaylists, savePlaylists, PersistedPlaylist } from '../services/localStore';
+import { nativeRequest } from '../services/nativeHttp';
+import { resolvePlaylistContent } from '../utils/playlistResolver';
 import {
   ListPlus,
   Tv,
   FileCode,
   Download,
   Trash2,
+  Pencil,
+  Check,
+  RotateCw,
   CheckCircle,
   AlertTriangle,
   Play,
@@ -16,16 +19,7 @@ import {
   Layers,
 } from 'lucide-react';
 
-interface PlaylistEntry {
-  id: string;
-  name: string;
-  type: 'w3u' | 'm3u';
-  source: 'url' | 'content';
-  itemCount: number;
-  groups: string[];
-  addedAt: string;
-  items: MediaItem[];
-}
+type PlaylistEntry = PersistedPlaylist;
 
 interface PlaylistsModalProps {
   isOpen: boolean;
@@ -40,116 +34,245 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
   onPlaylistItemSelect,
   onImportItems,
 }) => {
-  const [activeTab, setActiveTab] = useState<'manage' | 'import-w3u' | 'import-m3u' | 'direct'>('manage');
-  const [w3uInput, setW3uInput] = useState('');
-  const [m3uInput, setM3uInput] = useState('');
+  const [activeTab, setActiveTab] = useState<'manage' | 'import' | 'direct'>('manage');
+  const [smartInput, setSmartInput] = useState('');
   const [playlistName, setPlaylistName] = useState('');
   const [urlInput, setUrlInput] = useState('');
   const [directStreamUrl, setDirectStreamUrl] = useState('');
   const [directStreamTitle, setDirectStreamTitle] = useState('');
   const [statusMessage, setStatusMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
-  // Pre-loaded playlists storage
-  const [savedPlaylists, setSavedPlaylists] = useState<PlaylistEntry[]>(() => {
-    // Initial parsed samples
-    const w3uInitial = parseW3U(SAMPLE_W3U_CONTENT, 'Wiseplay Official W3U');
-    const m3uInitial = parseM3U(SAMPLE_M3U_CONTENT, 'IPTV Channels Global');
+  // Start empty; users add their own playlist sources.
+  const [savedPlaylists, setSavedPlaylists] = useState<PlaylistEntry[]>([]);
+  const [playlistsReady, setPlaylistsReady] = useState(false);
+  const [renamingPlaylistId, setRenamingPlaylistId] = useState<string | null>(null);
+  const [renamingName, setRenamingName] = useState('');
+  const [refreshingPlaylistId, setRefreshingPlaylistId] = useState<string | null>(null);
 
-    return [
-      {
-        id: 'pl-w3u-default',
-        name: 'Lenna Thai & Global Wiseplay W3U',
-        type: 'w3u',
-        source: 'content',
-        itemCount: w3uInitial.items.length,
-        groups: w3uInitial.groups,
-        addedAt: 'ระบบติดตั้งเริ่มต้น',
-        items: w3uInitial.items,
-      },
-      {
-        id: 'pl-m3u-default',
-        name: 'IPTV Live Streams M3U8',
-        type: 'm3u',
-        source: 'content',
-        itemCount: m3uInitial.items.length,
-        groups: m3uInitial.groups,
-        addedAt: 'ระบบติดตั้งเริ่มต้น',
-        items: m3uInitial.items,
-      },
-    ];
-  });
+  useEffect(() => {
+    let active = true;
+    loadPlaylists()
+      .then((items) => { if (active) setSavedPlaylists(items); })
+      .catch((error) => console.error('[Metur TV] Playlist load failed:', error))
+      .finally(() => { if (active) setPlaylistsReady(true); });
+    return () => { active = false; };
+  }, []);
 
-  const [selectedPlaylist, setSelectedPlaylist] = useState<PlaylistEntry | null>(savedPlaylists[0] || null);
+  useEffect(() => {
+    if (!playlistsReady) return;
+    savePlaylists(savedPlaylists).catch((error) => console.error('[Metur TV] Playlist save failed:', error));
+  }, [playlistsReady, savedPlaylists]);
+  const [selectedPlaylist, setSelectedPlaylist] = useState<PlaylistEntry | null>(null);
 
-  if (!isOpen) return null;
+  const makePlaylistId = () => {
+    const randomId = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2);
+    return `pl-${Date.now().toString(36)}-${randomId}`;
+  };
 
-  const handleImportW3U = () => {
+  const handleImportFile = async (file: File | undefined, type: 'w3u' | 'm3u') => {
+    if (!file) return;
     try {
-      const content = w3uInput.trim() || SAMPLE_W3U_CONTENT;
-      const parsed = parseW3U(content, playlistName || 'Wiseplay W3U List');
+      if (file.size === 0) throw new Error('ไฟล์นี้ไม่มีข้อมูล');
+      if (file.size > 8 * 1024 * 1024) {
+        throw new Error('ไฟล์มีขนาดเกิน 8 MB กรุณาใช้ Playlist ที่มีขนาดเล็กลง');
+      }
 
-      const newEntry: PlaylistEntry = {
-        id: `pl-${Date.now()}`,
-        name: playlistName || parsed.playlist.name,
-        type: 'w3u',
+      const content = await file.text();
+      if (!content.trim()) throw new Error('ไฟล์นี้ไม่มีเนื้อหา Playlist');
+      const name = playlistName.trim() || file.name.replace(/\.[^.]+$/, '');
+      const parsed = resolvePlaylistContent(content, name);
+      const detectedType = parsed.type;
+      if (parsed.items.length === 0) {
+        throw new Error('ไม่พบรายการสื่อในไฟล์ หรือโครงสร้าง Playlist ไม่ถูกต้อง');
+      }
+
+      const entry: PlaylistEntry = {
+        id: makePlaylistId(),
+        name,
+        type: detectedType,
         source: 'content',
         itemCount: parsed.items.length,
         groups: parsed.groups,
-        addedAt: 'เพิ่งนำเข้า',
+        addedAt: `นำเข้าจากไฟล์ ${file.name}`,
         items: parsed.items,
       };
-
-      setSavedPlaylists([newEntry, ...savedPlaylists]);
-      setSelectedPlaylist(newEntry);
-      onImportItems(parsed.items, newEntry.name);
-
+      setSavedPlaylists((previous) => [entry, ...previous]);
+      setSelectedPlaylist(entry);
+      onImportItems(parsed.items, entry.name);
+      setPlaylistName('');
       setStatusMessage({
-        text: `นำเข้า W3U สำเร็จ! พบ ${parsed.items.length} รายการ ใน ${parsed.groups.length} หมวดหมู่`,
+        text: `นำเข้าไฟล์ ${file.name} สำเร็จ ${parsed.items.length} รายการ`,
         type: 'success',
       });
-      setW3uInput('');
-      setPlaylistName('');
-      setTimeout(() => {
-        setActiveTab('manage');
-        setStatusMessage(null);
-      }, 1200);
-    } catch (e: any) {
-      setStatusMessage({ text: e.message || 'ไม่สามารถแปลผล W3U ได้', type: 'error' });
+      setActiveTab('manage');
+    } catch (error) {
+      setStatusMessage({
+        text: error instanceof Error ? error.message : 'ไม่สามารถอ่านไฟล์ Playlist ได้',
+        type: 'error',
+      });
     }
   };
 
-  const handleImportM3U = () => {
+  const handleImportSmart = async (file?: File) => {
+    const input = file ? await file.text() : smartInput.trim();
+    if (!input.trim()) {
+      setStatusMessage({ text: 'กรุณาวาง URL หรือโค้ด W3U / M3U / M3U8 หรือเลือกไฟล์', type: 'error' });
+      return;
+    }
     try {
-      const content = m3uInput.trim() || SAMPLE_M3U_CONTENT;
-      const parsed = parseM3U(content, playlistName || 'IPTV Playlist');
-
-      const newEntry: PlaylistEntry = {
-        id: `pl-${Date.now()}`,
-        name: playlistName || 'IPTV Playlist',
-        type: 'm3u',
-        source: 'content',
-        itemCount: parsed.items.length,
-        groups: parsed.groups,
-        addedAt: 'เพิ่งนำเข้า',
+      let content = input.trim();
+      let sourceUrl: string | undefined;
+      let contentBaseUrl: string | undefined;
+      let source: 'url' | 'content' = 'content';
+      if (/^https?:\/\//i.test(content)) {
+        const parsedUrl = new URL(content);
+        if (!['http:', 'https:'].includes(parsedUrl.protocol)) throw new Error('รองรับเฉพาะ HTTP/HTTPS');
+        sourceUrl = parsedUrl.toString();
+        source = 'url';
+        setStatusMessage({ text: 'กำลังตรวจสอบลิงก์และค้นหาไฟล์ Playlist...', type: 'success' });
+        // Gofile share pages are folders, not playlist files. Resolve their public
+        // contents endpoint first; the returned file URL is then fetched as text.
+        if (/^(?:www\.)?gofile\.io$/i.test(parsedUrl.hostname) && /^\/d\//.test(parsedUrl.pathname)) {
+          const code = parsedUrl.pathname.split('/').filter(Boolean)[1];
+          const listing = await nativeRequest<{ status?: string; data?: Record<string, unknown> }>(
+            `https://api.gofile.io/contents/${encodeURIComponent(code)}`,
+            'GET',
+            { Accept: 'application/json' },
+            undefined,
+            { allowRedirects: true },
+          );
+          if (!listing.ok) throw new Error('Gofile ไม่อนุญาตให้แอปอ่านรายการไฟล์ผ่าน API ในขณะนี้ กรุณาใช้ลิงก์ดาวน์โหลดไฟล์ Playlist โดยตรง หรือแชร์ไฟล์แบบสาธารณะ');
+          const payload = listing.data ?? JSON.parse(listing.body);
+          const root = (payload as any).data ?? payload;
+          const candidates: any[] = [];
+          const visited = new Set<string>();
+          const collect = (node: any) => {
+            if (!node || typeof node !== 'object') return;
+            const identity = String(node.id || '');
+            if (identity && visited.has(identity)) return;
+            if (identity) visited.add(identity);
+            const children = node.childs;
+            if (children && typeof children === 'object') {
+              const values = Array.isArray(children) ? children : Object.values(children);
+              values.forEach(collect);
+            }
+            if (node.type === 'file' && /\.(?:w3u|m3u8?)$/i.test(String(node.name || ''))) candidates.push(node);
+          };
+          collect(root);
+          if (!candidates.length) throw new Error('Gofile เปิดโฟลเดอร์ได้ แต่ไม่พบไฟล์ .w3u, .m3u หรือ .m3u8 ภายใน');
+          const selected = candidates.length === 1 ? candidates[0] : candidates.find((node) => /\.(?:w3u|m3u8?)$/i.test(String(node.name || '')));
+          const downloadUrl = String(selected.link || selected.directLink || '');
+          if (!downloadUrl) throw new Error('พบไฟล์ Playlist ใน Gofile แต่ไม่มีลิงก์ดาวน์โหลดโดยตรง');
+          sourceUrl = downloadUrl;
+          const fileResponse = await nativeRequest(downloadUrl, 'GET', { Accept: 'text/plain, application/json, */*' }, undefined, { allowRedirects: true });
+          if (!fileResponse.ok) throw new Error(`ดาวน์โหลดไฟล์ Playlist จาก Gofile ไม่สำเร็จ (HTTP ${fileResponse.status})`);
+          content = fileResponse.body;
+          contentBaseUrl = fileResponse.url || downloadUrl;
+        } else {
+          const response = await nativeRequest(content, 'GET',
+            { Accept: 'application/x-mpegURL, application/vnd.apple.mpegurl, text/plain, application/json, */*' },
+            undefined, { allowRedirects: true });
+          if (!response.ok) throw new Error(response.status > 0 ? `ดาวน์โหลดไม่สำเร็จ (HTTP ${response.status})` : response.error || 'ไม่สามารถเชื่อมต่อ URL ได้');
+          content = response.body;
+          contentBaseUrl = response.url || parsedUrl.toString();
+        }
+      }
+      if (!content.trim()) throw new Error('ไม่พบเนื้อหา Playlist ในข้อมูลที่ได้รับ');
+      const inferredName = file?.name || (sourceUrl ? new URL(sourceUrl).pathname.split('/').pop() : 'Imported Playlist') || 'Imported Playlist';
+      const name = playlistName.trim() || inferredName.replace(/\.(?:w3u|m3u8?)$/i, '');
+      const parsed = resolvePlaylistContent(content, name, contentBaseUrl || sourceUrl);
+      if (!parsed.items.length) throw new Error('ไม่พบรายการสื่อใน Playlist');
+      const entry: PlaylistEntry = {
+        id: makePlaylistId(), name: playlistName.trim() || parsed.name || name,
+        type: parsed.type, source, sourceUrl, itemCount: parsed.items.length,
+        groups: parsed.groups, addedAt: file ? `นำเข้าจากไฟล์ ${file.name}` : source === 'url' ? 'นำเข้าจาก URL' : 'เพิ่งนำเข้า',
         items: parsed.items,
       };
-
-      setSavedPlaylists([newEntry, ...savedPlaylists]);
-      setSelectedPlaylist(newEntry);
-      onImportItems(parsed.items, newEntry.name);
-
-      setStatusMessage({
-        text: `นำเข้า M3U สำเร็จ! พบ ${parsed.items.length} ช่องถ่ายทอดสด`,
-        type: 'success',
-      });
-      setM3uInput('');
+      setSavedPlaylists((previous) => [entry, ...previous]);
+      setSelectedPlaylist(entry);
+      onImportItems(parsed.items, entry.name);
+      setSmartInput('');
       setPlaylistName('');
-      setTimeout(() => {
-        setActiveTab('manage');
-        setStatusMessage(null);
-      }, 1200);
-    } catch (e: any) {
-      setStatusMessage({ text: 'ไม่สามารถแปลผล M3U ได้', type: 'error' });
+      setStatusMessage({ text: `ตรวจพบ ${parsed.type.toUpperCase()} · นำเข้าสำเร็จ ${parsed.items.length} รายการ`, type: 'success' });
+      setActiveTab('manage');
+    } catch (error) {
+      setStatusMessage({ text: error instanceof Error ? error.message : 'ไม่สามารถอ่าน Playlist ได้', type: 'error' });
+    }
+  };
+
+  if (!isOpen) return null;
+
+  const handleSavePlaylistName = (id: string) => {
+    const nextName = renamingName.trim();
+    if (!nextName) {
+      setStatusMessage({ text: 'กรุณาระบุชื่อเพลย์ลิสต์', type: 'error' });
+      return;
+    }
+    setSavedPlaylists((previous) => previous.map((playlist) =>
+      playlist.id === id ? { ...playlist, name: nextName } : playlist
+    ));
+    setSelectedPlaylist((previous) => previous?.id === id
+      ? { ...previous, name: nextName }
+      : previous);
+    setRenamingPlaylistId(null);
+    setRenamingName('');
+    setStatusMessage({ text: 'เปลี่ยนชื่อเพลย์ลิสต์แล้ว', type: 'success' });
+  };
+
+  const handleRefreshPlaylist = async (playlist: PlaylistEntry) => {
+    if (!playlist.sourceUrl) {
+      setStatusMessage({ text: 'เพลย์ลิสต์นี้มาจากไฟล์ในเครื่อง จึงไม่มี URL สำหรับอัปเดต', type: 'error' });
+      return;
+    }
+    if (refreshingPlaylistId) return;
+    setRefreshingPlaylistId(playlist.id);
+    setStatusMessage({ text: 'กำลังอัปเดตเพลย์ลิสต์จาก URL...', type: 'success' });
+    try {
+      const parsedUrl = new URL(playlist.sourceUrl);
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+        throw new Error('URL ของเพลย์ลิสต์ไม่ถูกต้อง');
+      }
+      const response = await nativeRequest(
+        parsedUrl.toString(),
+        'GET',
+        { Accept: 'application/x-mpegURL, application/vnd.apple.mpegurl, text/plain, application/json, */*' },
+        undefined,
+        { allowRedirects: true },
+      );
+      if (!response.ok) {
+        throw new Error(response.status > 0
+          ? `อัปเดตไม่สำเร็จ (HTTP ${response.status})`
+          : response.error || 'ไม่สามารถเชื่อมต่อ URL ได้');
+      }
+      const content = response.body;
+      if (!content.trim()) throw new Error('เซิร์ฟเวอร์ตอบกลับเป็นข้อมูลว่าง');
+      const parsed = resolvePlaylistContent(content, playlist.name, response.url || parsedUrl.toString());
+      if (parsed.items.length === 0) {
+        throw new Error('ไม่พบรายการสื่อใหม่ จึงเก็บข้อมูลเดิมไว้เพื่อป้องกันข้อมูลสูญหาย');
+      }
+      const updated: PlaylistEntry = {
+        ...playlist,
+        type: parsed.type,
+        itemCount: parsed.items.length,
+        groups: parsed.groups,
+        addedAt: `อัปเดตล่าสุด ${new Date().toLocaleString()}`,
+        items: parsed.items,
+      };
+      setSavedPlaylists((previous) => previous.map((entry) =>
+        entry.id === playlist.id ? updated : entry
+      ));
+      setSelectedPlaylist((previous) => previous?.id === playlist.id ? updated : previous);
+      onImportItems(parsed.items, updated.name);
+      setStatusMessage({ text: `อัปเดตสำเร็จ พบ ${parsed.items.length} รายการ`, type: 'success' });
+    } catch (error) {
+      setStatusMessage({
+        text: error instanceof Error ? error.message : 'อัปเดต Playlist ไม่สำเร็จ',
+        type: 'error',
+      });
+    } finally {
+      setRefreshingPlaylistId(null);
     }
   };
 
@@ -199,7 +322,7 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xl">
+    <div data-tv-modal="true" data-tv-focus-group="modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xl">
       <div className="relative w-full max-w-4xl bg-[#090b10] border border-white/10 rounded-3xl p-6 md:p-8 shadow-2xl flex flex-col gap-6 max-h-[90vh] overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between pb-4 border-b border-white/5">
@@ -237,26 +360,11 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
             เพลย์ลิสต์ทั้งหมด ({savedPlaylists.length})
           </button>
           <button
-            onClick={() => setActiveTab('import-w3u')}
-            className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
-              activeTab === 'import-w3u'
-                ? 'bg-white text-black shadow-md'
-                : 'text-slate-400 hover:text-white'
-            }`}
+            onClick={() => setActiveTab('import')}
+            className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 ${activeTab === 'import' ? 'bg-white text-black shadow-md' : 'text-slate-400 hover:text-white'}`}
           >
             <FileCode className="w-4 h-4" />
-            นำเข้า W3U (Wiseplay)
-          </button>
-          <button
-            onClick={() => setActiveTab('import-m3u')}
-            className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
-              activeTab === 'import-m3u'
-                ? 'bg-white text-black shadow-md'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Tv className="w-4 h-4" />
-            นำเข้า M3U / M3U8
+            เพิ่ม Playlist
           </button>
           <button
             onClick={() => setActiveTab('direct')}
@@ -302,6 +410,16 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
                 return (
                   <div
                     key={pl.id}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={"เลือกเพลย์ลิสต์ " + pl.name}
+                    onKeyDown={(event) => {
+                      if (event.target !== event.currentTarget) return;
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        setSelectedPlaylist(pl);
+                      }
+                    }}
                     onClick={() => setSelectedPlaylist(pl)}
                     className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
                       isSel
@@ -317,14 +435,33 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
                           <Tv className="w-4 h-4 text-purple-400" />
                         )}
                       </div>
-                      <div className="flex flex-col overflow-hidden">
-                        <span className="text-xs font-semibold text-white truncate">
-                          {pl.name}
-                        </span>
+                      <div className="flex flex-col overflow-hidden flex-1">
+                        {renamingPlaylistId === pl.id ? (
+                          <input
+                            autoFocus
+                            value={renamingName}
+                            aria-label="ชื่อเพลย์ลิสต์ใหม่"
+                            onChange={(event) => setRenamingName(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                handleSavePlaylistName(pl.id);
+                              }
+                              if (event.key === 'Escape') {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                setRenamingPlaylistId(null);
+                              }
+                            }}
+                            onClick={(event) => event.stopPropagation()}
+                            className="w-full min-w-0 px-2 py-1 rounded-lg bg-black/40 border border-cyan-400/50 text-white text-xs focus:outline-none"
+                          />
+                        ) : (
+                          <span className="text-xs font-semibold text-white truncate">{pl.name}</span>
+                        )}
                         <div className="flex items-center gap-1.5 text-[11px] text-slate-400 mt-0.5">
-                          <span className="uppercase text-slate-300 font-medium">
-                            {pl.type}
-                          </span>
+                          <span className="uppercase text-slate-300 font-medium">{pl.type}</span>
                           <span aria-hidden="true">·</span>
                           <span>{pl.itemCount} รายการ</span>
                           <span aria-hidden="true">·</span>
@@ -333,13 +470,39 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
                       </div>
                     </div>
 
-                    <button
-                      onClick={(e) => handleDeletePlaylist(pl.id, e)}
-                      className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
-                      title="ลบเพลย์ลิสต์"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {renamingPlaylistId === pl.id ? (
+                        <>
+                          <button
+                            onClick={(event) => { event.stopPropagation(); handleSavePlaylistName(pl.id); }}
+                            className="p-1.5 rounded-lg text-emerald-300 hover:bg-emerald-500/10"
+                            aria-label="บันทึกชื่อเพลย์ลิสต์"
+                          ><Check className="w-3.5 h-3.5" /></button>
+                          <button
+                            onClick={(event) => { event.stopPropagation(); setRenamingPlaylistId(null); }}
+                            className="p-1.5 rounded-lg text-slate-400 hover:bg-white/10"
+                            aria-label="ยกเลิกเปลี่ยนชื่อ"
+                          ><X className="w-3.5 h-3.5" /></button>
+                        </>
+                      ) : (
+                        <button
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setRenamingPlaylistId(pl.id);
+                            setRenamingName(pl.name);
+                          }}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-300 hover:bg-cyan-500/10"
+                          title="เปลี่ยนชื่อเพลย์ลิสต์"
+                          aria-label="เปลี่ยนชื่อเพลย์ลิสต์"
+                        ><Pencil className="w-3.5 h-3.5" /></button>
+                      )}
+                      <button
+                        onClick={(event) => handleDeletePlaylist(pl.id, event)}
+                        className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                        title="ลบเพลย์ลิสต์"
+                        aria-label="ลบเพลย์ลิสต์"
+                      ><Trash2 className="w-3.5 h-3.5" /></button>
+                    </div>
                   </div>
                 );
               })}
@@ -359,6 +522,17 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
+                      {selectedPlaylist.source === 'url' && selectedPlaylist.sourceUrl && (
+                        <button
+                          onClick={() => void handleRefreshPlaylist(selectedPlaylist)}
+                          disabled={refreshingPlaylistId !== null}
+                          className="px-2.5 py-1 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-200 disabled:opacity-40 text-xs flex items-center gap-1 border border-cyan-400/20"
+                          title="อัปเดต Playlist จาก URL"
+                        >
+                          <RotateCw className={`w-3.5 h-3.5 ${refreshingPlaylistId === selectedPlaylist.id ? 'animate-spin' : ''}`} />
+                          <span>อัปเดต</span>
+                        </button>
+                      )}
                       <button
                         onClick={() => handleExportPlaylist(selectedPlaylist)}
                         className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white text-xs flex items-center gap-1 border border-white/5 transition-colors"
@@ -378,6 +552,17 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
                     {selectedPlaylist.items.map((item, idx) => (
                       <div
                         key={item.id || idx}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={"เล่น " + item.title}
+                        onKeyDown={(event) => {
+                          if (event.target !== event.currentTarget) return;
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            onPlaylistItemSelect(item);
+                            onClose();
+                          }
+                        }}
                         onClick={() => {
                           onPlaylistItemSelect(item);
                           onClose();
@@ -418,103 +603,36 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
           </div>
         )}
 
-        {/* Import W3U Tab */}
-        {activeTab === 'import-w3u' && (
+        {/* Smart Playlist Input: format is detected from content, not extension. */}
+        {activeTab === 'import' && (
           <div className="flex flex-col gap-4 overflow-y-auto no-scrollbar">
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-slate-400">ชื่อเพลย์ลิสต์ W3U</label>
-              <input
-                type="text"
-                placeholder="เช่น Wiseplay Cinema Thai, Sports 2026"
-                value={playlistName}
+              <label className="text-xs font-medium text-slate-400">ชื่อเพลย์ลิสต์ (ไม่บังคับ)</label>
+              <input type="text" placeholder="ตั้งชื่อ Playlist" value={playlistName}
                 onChange={(e) => setPlaylistName(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-white transition-colors"
-              />
+                className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-white" />
             </div>
-
             <div className="flex flex-col gap-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium text-slate-400">
-                  เนื้อหา JSON ของ W3U (โครงสร้าง groups, stations, url)
-                </label>
-                <button
-                  type="button"
-                  onClick={() => setW3uInput(SAMPLE_W3U_CONTENT)}
-                  className="text-[11px] text-sky-400 hover:text-sky-300 font-medium transition-colors"
-                >
-                  ใส่ตัวอย่าง Wiseplay W3U จำลอง
-                </button>
-              </div>
-              <textarea
-                rows={8}
-                placeholder="วางโค้ด JSON ของ w3u ที่นี่..."
-                value={w3uInput}
-                onChange={(e) => setW3uInput(e.target.value)}
-                className="w-full p-4 rounded-xl bg-white/5 border border-white/10 text-white font-mono text-xs focus:outline-none focus:border-white transition-colors"
-              />
+              <label className="text-xs font-medium text-slate-300">วาง URL หรือโค้ด Playlist ในช่องเดียว</label>
+              <textarea rows={11}
+                placeholder={'วางลิงก์ เช่น https://example.com/list หรือโค้ด\n#EXTM3U\n#EXTINF:-1,Channel 1\nhttps://example.com/live.m3u8\n\nหรือวาง JSON/W3U'}
+                value={smartInput} onChange={(e) => setSmartInput(e.target.value)}
+                className="w-full p-4 rounded-xl bg-white/5 border border-white/10 text-white font-mono text-xs focus:outline-none focus:border-cyan-400" />
             </div>
-
-            <div className="flex items-center justify-between pt-2">
-              <span className="text-[11px] text-slate-500">
-                รองรับการถอดรหัส groups, stations, headers (User-Agent/Referer)
-              </span>
-              <button
-                onClick={handleImportW3U}
-                className="px-6 py-2.5 rounded-xl bg-white text-black text-xs font-semibold hover:bg-slate-200 transition-colors flex items-center gap-2"
-              >
-                <Download className="w-4 h-4" />
-                เริ่มแปลผลและนำเข้า W3U
-              </button>
+            <div className="flex flex-col gap-2 p-3 rounded-xl bg-white/[0.03] border border-white/10">
+              <label className="text-xs font-medium text-slate-300">หรือเลือกไฟล์จากอุปกรณ์ (ตรวจชนิดให้อัตโนมัติ)</label>
+              <input type="file" accept=".w3u,.m3u,.m3u8,.json,text/plain,application/json"
+                aria-label="เลือกไฟล์ Playlist" onChange={(e) => {
+                  const selected = e.currentTarget.files?.[0];
+                  if (selected) void handleImportSmart(selected);
+                  e.currentTarget.value = '';
+                }} className="w-full text-xs text-slate-300" />
             </div>
-          </div>
-        )}
-
-        {/* Import M3U Tab */}
-        {activeTab === 'import-m3u' && (
-          <div className="flex flex-col gap-4 overflow-y-auto no-scrollbar">
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-slate-400">ชื่อเพลย์ลิสต์ M3U / IPTV</label>
-              <input
-                type="text"
-                placeholder="เช่น Thai Digital TV, World News M3U8"
-                value={playlistName}
-                onChange={(e) => setPlaylistName(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-white transition-colors"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium text-slate-400">
-                  เนื้อหา M3U (#EXTM3U, #EXTINF และ URL สตรีม)
-                </label>
-                <button
-                  type="button"
-                  onClick={() => setM3uInput(SAMPLE_M3U_CONTENT)}
-                  className="text-[11px] text-purple-400 hover:text-purple-300 font-medium transition-colors"
-                >
-                  ใส่ตัวอย่าง IPTV M3U จำลอง
-                </button>
-              </div>
-              <textarea
-                rows={8}
-                placeholder="#EXTM3U&#10;#EXTINF:-1 tvg-name=&quot;Channel 1&quot; group-title=&quot;News&quot;,Channel 1&#10;https://example.com/live.m3u8"
-                value={m3uInput}
-                onChange={(e) => setM3uInput(e.target.value)}
-                className="w-full p-4 rounded-xl bg-white/5 border border-white/10 text-white font-mono text-xs focus:outline-none focus:border-white transition-colors"
-              />
-            </div>
-
-            <div className="flex items-center justify-between pt-2">
-              <span className="text-[11px] text-slate-500">
-                รองรับการตรวจจับ tvg-logo, group-title และ stream headers
-              </span>
-              <button
-                onClick={handleImportM3U}
-                className="px-6 py-2.5 rounded-xl bg-white text-black text-xs font-semibold hover:bg-slate-200 transition-colors flex items-center gap-2"
-              >
-                <Download className="w-4 h-4" />
-                เริ่มแปลผลและนำเข้า M3U
+            <div className="flex items-center justify-between gap-3 pt-2">
+              <span className="text-[11px] text-slate-500">ระบบแยก W3U / M3U / M3U8 จากข้อมูลจริง ไม่ต้องเลือกประเภท</span>
+              <button type="button" onClick={() => void handleImportSmart()}
+                className="px-6 py-2.5 rounded-xl bg-white text-black text-xs font-semibold hover:bg-slate-200 flex items-center gap-2">
+                <Download className="w-4 h-4" /> ตรวจจับและนำเข้า
               </button>
             </div>
           </div>

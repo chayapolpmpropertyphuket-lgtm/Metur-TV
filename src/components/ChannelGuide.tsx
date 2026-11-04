@@ -49,7 +49,7 @@ export const ChannelGuide: React.FC<ChannelGuideProps> = ({
       </div>
 
       {/* Channels Grid / EPG list */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div data-tv-focus-group="channel-grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filteredChannels.length === 0 ? (
           <div className="col-span-full py-12 text-center text-slate-500 text-xs">
             ไม่พบช่องในหมวดหมู่นี้
@@ -61,6 +61,16 @@ export const ChannelGuide: React.FC<ChannelGuideProps> = ({
             return (
               <div
                 key={channel.id}
+                role="button"
+                tabIndex={0}
+                aria-label={"รับชม " + channel.title}
+                onKeyDown={(event) => {
+                  if (event.target !== event.currentTarget) return;
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onSelectChannel(channel);
+                  }
+                }}
                 onClick={() => onSelectChannel(channel)}
                 onMouseEnter={() => onFocusChannel?.(channel)}
                 className={`p-4 rounded-2xl border transition-all duration-200 cursor-pointer flex flex-col justify-between gap-3 group outline-none ${

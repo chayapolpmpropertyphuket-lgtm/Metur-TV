@@ -80,16 +80,60 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
 
     setStreamError(null);
     const url = item.streamUrl;
+    const streamHeaders = item.headers ?? {};
+    const hasCustomHeaders = Object.keys(streamHeaders).length > 0;
+    const isHlsSource = url.toLowerCase().includes('.m3u8') || item.type === 'channel';
+    const nativePlayer = (window as any).MeturNativePlayer;
+    if (hasCustomHeaders && nativePlayer && typeof nativePlayer.play === 'function') {
+      (window as any).__meturNativePlayerError = (message: string) => setStreamError(message);
+      nativePlayer.play(url, item.title, JSON.stringify(streamHeaders), item.type);
+      return () => {
+        delete (window as any).__meturNativePlayerError;
+      };
+    }
 
-    if (Hls.isSupported() && (url.includes('.m3u8') || item.type === 'channel')) {
+    const browserBlockedHeaders = Object.keys(streamHeaders).filter((name) =>
+      /^(host|cookie|origin|content-length|connection|referer|user-agent)$/i.test(name)
+    );
+
+    // Browser fallback: do not silently discard headers the WebView cannot set.
+    if (browserBlockedHeaders.length > 0) {
+      setStreamError('สตรีมนี้ต้องใช้ Header ที่เบราว์เซอร์ไม่อนุญาตให้แอปกำหนด (' + browserBlockedHeaders.join(', ') + ') ต้องเปิดเล่นผ่าน Android Native Player');
+      return;
+    }
+    if (hasCustomHeaders && (!isHlsSource || !Hls.isSupported())) {
+      setStreamError('สตรีมนี้ต้องใช้ HTTP Headers เพิ่มเติม แต่ไม่พบ Native Player บนอุปกรณ์นี้');
+      return;
+    }
+
+    if (Hls.isSupported() && isHlsSource) {
       if (hlsRef.current) {
         hlsRef.current.destroy();
       }
+
+      const applyHeaders = (headers: Headers) => {
+        Object.entries(streamHeaders).forEach(([name, value]) => {
+          // These are browser-controlled or security-sensitive request headers.
+          if (/^(host|cookie|origin|content-length|connection|referer)$/i.test(name)) return;
+          try { headers.set(name, value); } catch { /* Ignore invalid browser headers. */ }
+        });
+      };
 
       const hls = new Hls({
         maxBufferLength: settings.bufferSizeMB > 64 ? 60 : 30,
         enableWorker: true,
         lowLatencyMode: true,
+        xhrSetup: (xhr) => {
+          Object.entries(streamHeaders).forEach(([name, value]) => {
+            if (/^(host|cookie|origin|content-length|connection|referer)$/i.test(name)) return;
+            try { xhr.setRequestHeader(name, value); } catch { /* Ignore invalid browser headers. */ }
+          });
+        },
+        fetchSetup: (context, initParams) => {
+          const headers = new Headers(initParams.headers);
+          applyHeaders(headers);
+          return new Request(context.url, { ...initParams, headers });
+        },
       });
 
       hlsRef.current = hls;
@@ -134,7 +178,14 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
         hlsRef.current = null;
       }
     };
-  }, [item.streamUrl, item.type, settings.bufferSizeMB]);
+  }, [item.streamUrl, item.type, item.headers, settings.bufferSizeMB]);
+
+  // Return to the app screen after the native Android player is closed.
+  useEffect(() => {
+    const handleNativePlayerReturn = () => onClose();
+    window.addEventListener('metur-native-player-returned', handleNativePlayerReturn);
+    return () => window.removeEventListener('metur-native-player-returned', handleNativePlayerReturn);
+  }, [onClose]);
 
   // Sleep timer interval countdown
   useEffect(() => {

@@ -24,7 +24,7 @@
         android:required="false" />
 
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="Metur TV"
         android:banner="@drawable/tv_banner"
@@ -34,6 +34,13 @@
         android:hardwareAccelerated="true"
         android:usesCleartextTraffic="true"
         tools:targetApi="34">
+
+        <activity
+            android:name=".NativePlayerActivity"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+            android:theme="@style/Theme.MeturTV.Fullscreen" />
 
         <activity
             android:name=".MainActivity"

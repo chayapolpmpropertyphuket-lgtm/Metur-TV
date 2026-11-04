@@ -8,7 +8,7 @@
 
   body {
     font-family: var(--font-sans);
-    background-color: #050608;
+    background-color: #080B1A;
     color: #f1f5f9;
     user-select: none;
     -webkit-font-smoothing: antialiased;
@@ -38,10 +38,13 @@
 /* Android TV Remote Focus */
 button:focus-visible,
 a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
 [tabindex]:focus-visible {
-  outline: 3px solid #ffffff !important;
+  outline: 3px solid #22D3EE !important;
   outline-offset: 4px;
-  box-shadow: 0 0 0 6px rgba(56, 189, 248, 0.35);
+  box-shadow: 0 0 0 6px rgba(124, 58, 237, 0.38), 0 0 28px rgba(34, 211, 238, 0.28);
   position: relative;
   z-index: 100;
 }

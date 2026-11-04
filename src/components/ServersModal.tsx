@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { MediaServerConfig } from '../types';
+import { saveServerCredentials } from '../services/secureVault';
+import { connectJellyfinOrEmby, connectJellyfinQuickConnect } from '../services/mediaServerClient';
 import {
   Server,
   Plus,
@@ -17,9 +19,9 @@ interface ServersModalProps {
   servers: MediaServerConfig[];
   isOpen: boolean;
   onClose: () => void;
-  onAddServer: (server: MediaServerConfig) => void;
+  onAddServer: (server: MediaServerConfig, items: import('../types').MediaItem[]) => void;
+  onConnectServer: (server: MediaServerConfig) => void;
   onRemoveServer: (id: string) => void;
-  onSyncServer: (id: string) => void;
 }
 
 export const ServersModal: React.FC<ServersModalProps> = ({
@@ -27,8 +29,8 @@ export const ServersModal: React.FC<ServersModalProps> = ({
   isOpen,
   onClose,
   onAddServer,
+  onConnectServer,
   onRemoveServer,
-  onSyncServer,
 }) => {
   const [activeTab, setActiveTab] = useState<'list' | 'add'>('list');
   const [serverType, setServerType] = useState<'jellyfin' | 'emby' | 'plex' | 'webdav'>('jellyfin');
@@ -37,36 +39,97 @@ export const ServersModal: React.FC<ServersModalProps> = ({
   const [username, setUsername] = useState('');
   const [token, setToken] = useState('');
   const [testingStatus, setTestingStatus] = useState<string | null>(null);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [quickConnectCode, setQuickConnectCode] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
-  const handleTestAndSave = (e: React.FormEvent) => {
+  const handleTestAndSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!serverUrl) return;
+    const normalizedUrl = serverUrl.trim();
+    if (!normalizedUrl) return;
 
-    setTestingStatus('กำลังเชื่อมต่อและตรวจสอบโปรโตคอล...');
+    setIsConnecting(true);
+    setTestingStatus(null);
+    try {
+      const parsedUrl = new URL(normalizedUrl);
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+        throw new Error('รองรับเฉพาะ URL แบบ HTTP หรือ HTTPS');
+      }
 
-    setTimeout(() => {
       const newServer: MediaServerConfig = {
         id: `srv-${Date.now()}`,
-        name: serverName || `${serverType.toUpperCase()} Server`,
+        name: serverName.trim() || `${serverType.toUpperCase()} Server`,
         type: serverType,
-        url: serverUrl,
-        username: username || 'user',
-        token,
-        status: 'connected',
-        itemCount: Math.floor(Math.random() * 2000) + 500,
-        lastSync: 'เพิ่งซิงค์เมื่อสักครู่',
+        url: normalizedUrl.replace(/\/$/, ''),
+        username: username.trim() || undefined,
+        token: token || undefined,
+        status: 'disconnected',
+        itemCount: 0,
       };
 
-      onAddServer(newServer);
-      setTestingStatus(null);
+      if (serverType === 'jellyfin' || serverType === 'emby') {
+        const result = await connectJellyfinOrEmby(newServer, newServer.username || '', newServer.token || '');
+        onAddServer(result.server, result.items);
+        setTestingStatus(`เชื่อมต่อสำเร็จ · ${result.items.length.toLocaleString()} รายการ${result.userName ? ` · ${result.userName}` : ''}`);
+      } else {
+        await saveServerCredentials(newServer.id, {
+          username: newServer.username,
+          token: newServer.token,
+        });
+        onAddServer({ ...newServer, username: undefined, token: undefined }, []);
+        setTestingStatus('บันทึกข้อมูลแล้ว แต่การเชื่อมต่อจริงสำหรับ Plex และ WebDAV จะเพิ่มในขั้นถัดไป');
+      }
       setActiveTab('list');
       setServerName('');
       setServerUrl('');
       setUsername('');
       setToken('');
-    }, 800);
+    } catch (error) {
+      setTestingStatus(error instanceof Error ? error.message : 'เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ');
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+
+  const handleQuickConnect = async () => {
+    const normalizedUrl = serverUrl.trim();
+    if (!normalizedUrl) {
+      setTestingStatus('กรุณากรอก Server URL ของ Jellyfin ก่อน');
+      return;
+    }
+    setIsConnecting(true);
+    setQuickConnectCode(null);
+    setTestingStatus('กำลังเริ่ม Quick Connect...');
+    try {
+      const parsedUrl = new URL(normalizedUrl);
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) throw new Error('รองรับเฉพาะ URL แบบ HTTP หรือ HTTPS');
+      const server: MediaServerConfig = {
+        id: `srv-${Date.now()}`,
+        name: serverName.trim() || 'Jellyfin Server',
+        type: 'jellyfin',
+        url: parsedUrl.toString().replace(/\/$/, ''),
+        status: 'connecting',
+        itemCount: 0,
+      };
+      const result = await connectJellyfinQuickConnect(server, (code) => {
+        setQuickConnectCode(code);
+        setTestingStatus('เปิด Jellyfin บนมือถือหรือคอมพิวเตอร์ ไปที่ Quick Connect แล้วกรอกรหัสนี้เพื่ออนุมัติ');
+      });
+      onAddServer(result.server, result.items);
+      setTestingStatus(`เชื่อมต่อสำเร็จ · ${result.items.length.toLocaleString()} รายการ${result.userName ? ` · ${result.userName}` : ''}`);
+      setQuickConnectCode(null);
+      setActiveTab('list');
+      setServerName('');
+      setServerUrl('');
+      setUsername('');
+      setToken('');
+    } catch (error) {
+      setTestingStatus(error instanceof Error ? error.message : 'Quick Connect ไม่สำเร็จ');
+    } finally {
+      setIsConnecting(false);
+    }
   };
 
   const getServerBadgeColor = (type: string) => {
@@ -83,7 +146,7 @@ export const ServersModal: React.FC<ServersModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xl">
+    <div data-tv-modal="true" data-tv-focus-group="modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xl">
       <div className="relative w-full max-w-2xl bg-[#090b10] border border-white/10 rounded-3xl p-6 md:p-8 shadow-2xl flex flex-col gap-6 max-h-[90vh] overflow-y-auto no-scrollbar">
         {/* Header */}
         <div className="flex items-center justify-between pb-4 border-b border-white/5">
@@ -173,23 +236,18 @@ export const ServersModal: React.FC<ServersModalProps> = ({
                       <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5 truncate">
                         <span className="font-mono">{srv.url}</span>
                         <span aria-hidden="true">·</span>
-                        <span>{srv.itemCount.toLocaleString()} สื่อ</span>
+                        <span>{srv.itemCount.toLocaleString()} สื่อที่ซิงค์</span>
+                        <span aria-hidden="true">·</span>
+                        <span>{srv.status === 'connected' ? 'เชื่อมต่อแล้ว' : srv.status === 'error' ? 'เชื่อมต่อล้มเหลว' : 'ยังไม่ได้เชื่อมต่อ'}</span>
                       </div>
-                      <span className="text-[11px] text-slate-500 mt-0.5">
-                        {srv.lastSync}
-                      </span>
                     </div>
                   </div>
 
                   {/* Actions */}
                   <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      onClick={() => onSyncServer(srv.id)}
-                      className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
-                      title="ซิงค์ไลบรารีใหม่"
-                    >
-                      <RefreshCw className="w-4 h-4" />
-                    </button>
+                    {(srv.type === 'jellyfin' || srv.type === 'emby') && (
+                      <button onClick={() => onConnectServer(srv)} className="px-3 py-2 rounded-lg text-xs text-sky-300 bg-sky-500/10 hover:bg-sky-500/20" title="เชื่อมต่อและซิงค์รายการ">เชื่อมต่อ / ซิงค์</button>
+                    )}
                     <button
                       onClick={() => onRemoveServer(srv.id)}
                       className="p-2 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
@@ -285,50 +343,28 @@ export const ServersModal: React.FC<ServersModalProps> = ({
               </div>
             </div>
 
-            {/* Direct Connect Presets for Fast Testing */}
-            <div className="flex flex-col gap-2 pt-2">
-              <span className="text-[11px] text-slate-500">หรือทดสอบด้วยค่าจำลองด่วน:</span>
-              <div className="flex gap-2">
+            {serverType === 'jellyfin' && (
+              <div className="flex flex-col gap-2 p-3 rounded-xl bg-purple-500/5 border border-purple-500/15">
+                <div className="text-xs text-slate-300">Quick Connect — ไม่ต้องกรอก Username หรือ Password</div>
                 <button
                   type="button"
-                  onClick={() => {
-                    setServerType('jellyfin');
-                    setServerName('My Jellyfin Master');
-                    setServerUrl('http://192.168.1.120:8096');
-                    setUsername('family_tv');
-                  }}
-                  className="text-xs px-2.5 py-1 rounded bg-white/5 text-slate-300 hover:bg-white/10 transition-colors"
+                  onClick={handleQuickConnect}
+                  disabled={isConnecting || !serverUrl.trim()}
+                  className="w-full py-2.5 rounded-xl bg-purple-500/15 border border-purple-400/25 text-purple-200 text-xs font-semibold hover:bg-purple-500/25 disabled:opacity-40"
                 >
-                  Jellyfin 10.9
+                  {isConnecting ? 'กำลังรอการอนุมัติ...' : 'เริ่ม Quick Connect'}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setServerType('emby');
-                    setServerName('Cinema Emby Server');
-                    setServerUrl('http://192.168.1.150:8096');
-                    setUsername('cinema_user');
-                  }}
-                  className="text-xs px-2.5 py-1 rounded bg-white/5 text-slate-300 hover:bg-white/10 transition-colors"
-                >
-                  Emby Premiere
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setServerType('plex');
-                    setServerName('Cloud Plex Library');
-                    setServerUrl('https://plex.mycloud.org:32400');
-                    setUsername('plex_pass');
-                  }}
-                  className="text-xs px-2.5 py-1 rounded bg-white/5 text-slate-300 hover:bg-white/10 transition-colors"
-                >
-                  Plex Cloud
-                </button>
+                {quickConnectCode && (
+                  <div className="text-center py-2">
+                    <div className="text-[10px] text-slate-400 mb-1">กรอกรหัสนี้ใน Jellyfin เพื่ออนุมัติการเชื่อมต่อ</div>
+                    <div className="text-3xl font-mono font-bold tracking-[0.35em] text-white">{quickConnectCode}</div>
+                    <div className="text-[10px] text-slate-500 mt-1">รอการอนุมัติได้สูงสุด 2 นาที</div>
+                  </div>
+                )}
               </div>
-            </div>
+            )}
 
-            {/* Test Status Feedback */}
+            {/* Connection status feedback */}
             {testingStatus && (
               <div className="flex items-center gap-2 p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-xs">
                 <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
@@ -347,10 +383,11 @@ export const ServersModal: React.FC<ServersModalProps> = ({
               </button>
               <button
                 type="submit"
+                disabled={isConnecting}
                 className="px-6 py-2.5 rounded-xl bg-white text-black text-xs font-semibold hover:bg-slate-200 transition-colors flex items-center gap-2"
               >
                 <ShieldCheck className="w-4 h-4" />
-                บันทึกและเชื่อมต่อ
+                {isConnecting ? 'กำลังเชื่อมต่อ...' : 'เชื่อมต่อและบันทึก'}
               </button>
             </div>
           </form>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   MediaItem,
   MediaServerConfig,
@@ -6,13 +6,7 @@ import {
 } from './types';
 import {
   DEFAULT_TV_SETTINGS,
-  INITIAL_FEATURED_ITEMS,
-  INITIAL_CONTINUE_WATCHING,
-  INITIAL_LIVE_CHANNELS,
-  INITIAL_SERVERS,
-  SAMPLE_W3U_CONTENT,
 } from './data/sampleData';
-import { parseW3U } from './utils/w3uParser';
 import { BackdropAmbient } from './components/BackdropAmbient';
 import { Sidebar, TabType } from './components/Sidebar';
 import { HeroBanner } from './components/HeroBanner';
@@ -25,7 +19,9 @@ import { MediaDetailsModal } from './components/MediaDetailsModal';
 import { ChannelGuide } from './components/ChannelGuide';
 import { VirtualRemote } from './components/VirtualRemote';
 import { VoiceSearch } from './components/VoiceSearch';
-import { ApkBuildModal } from './components/ApkBuildModal';
+import { loadAppState, saveAppState } from './services/localStore';
+import { deleteServerCredentials, getServerCredential } from './services/secureVault';
+import { buildAuthenticatedStreamUrl, connectJellyfinOrEmby } from './services/mediaServerClient';
 import {
   Server,
   ListPlus,
@@ -40,37 +36,159 @@ import {
   Clock,
   Play,
   Moon,
-  Smartphone,
 } from 'lucide-react';
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<TabType>('home');
   const [settings, setSettings] = useState<TVSettings>(DEFAULT_TV_SETTINGS);
-  const [servers, setServers] = useState<MediaServerConfig[]>(INITIAL_SERVERS);
+  const [servers, setServers] = useState<MediaServerConfig[]>([]);
 
   // Media Collections
-  const [featuredItems, setFeaturedItems] = useState<MediaItem[]>(INITIAL_FEATURED_ITEMS);
-  const [continueWatching, setContinueWatching] = useState<MediaItem[]>(INITIAL_CONTINUE_WATCHING);
-  const [liveChannels, setLiveChannels] = useState<MediaItem[]>(INITIAL_LIVE_CHANNELS);
+  const [featuredItems, setFeaturedItems] = useState<MediaItem[]>([]);
+  const [serverItems, setServerItems] = useState<MediaItem[]>([]);
+  const [continueWatching, setContinueWatching] = useState<MediaItem[]>([]);
+  const [liveChannels, setLiveChannels] = useState<MediaItem[]>([]);
 
   // Extra W3U imported items
-  const [w3uItems, setW3uItems] = useState<MediaItem[]>(() => {
+  const [w3uItems, setW3uItems] = useState<MediaItem[]>([]);
+
+  // Watch History
+  const [watchHistory, setWatchHistory] = useState<MediaItem[]>([]);
+  const [storageReady, setStorageReady] = useState(false);
+
+  // Opt-in, local-only diagnostics. Never record field values, URLs, credentials,
+  // media titles, or server details.
+  const [diagnosticsExportStatus, setDiagnosticsExportStatus] = useState('');
+  const [diagnosticsEnabled, setDiagnosticsEnabled] = useState(
+    () => localStorage.getItem('metur_diagnostics_enabled') === 'true'
+  );
+  const [diagnosticEvents, setDiagnosticEvents] = useState<Array<Record<string, unknown>>>(() => {
     try {
-      const parsed = parseW3U(SAMPLE_W3U_CONTENT, 'Wiseplay 4K Cinema');
-      return parsed.items;
+      const saved = localStorage.getItem('metur_diagnostics_events');
+      return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
     }
   });
 
-  // Watch History
-  const [watchHistory, setWatchHistory] = useState<MediaItem[]>([
-    INITIAL_CONTINUE_WATCHING[0],
-    INITIAL_CONTINUE_WATCHING[1],
-  ]);
+  useEffect(() => {
+    if (!diagnosticsEnabled) return;
+    try {
+      localStorage.setItem('metur_diagnostics_events', JSON.stringify(diagnosticEvents.slice(-500)));
+    } catch {
+      // Diagnostics must never interrupt normal TV playback or navigation.
+    }
+  }, [diagnosticsEnabled, diagnosticEvents]);
+
+  useEffect(() => {
+    if (!diagnosticsEnabled) return;
+    const record = (type: string, detail: Record<string, unknown> = {}) => {
+      const event = { at: new Date().toISOString(), type, ...detail };
+      setDiagnosticEvents((previous) => [...previous.slice(-499), event]);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      const keys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'Escape', 'Backspace'];
+      if (!keys.includes(event.key)) return;
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      record('remote_key', {
+        key: event.key,
+        targetTag: target?.tagName || 'unknown',
+        targetRole: target?.getAttribute('role') || undefined,
+        targetType: target instanceof HTMLInputElement ? target.type : undefined,
+      });
+    };
+    const onFocus = (event: FocusEvent) => {
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (!target) return;
+      record('focus', {
+        targetTag: target.tagName,
+        targetRole: target.getAttribute('role') || undefined,
+        targetType: target instanceof HTMLInputElement ? target.type : undefined,
+      });
+    };
+    const onError = () => record('window_error');
+    const onRejection = () => record('unhandled_promise_rejection');
+    const onScroll = (event: Event) => {
+      const target = event.target instanceof HTMLElement ? event.target : document.documentElement;
+      record('scroll', {
+        targetTag: target.tagName,
+        scrollTop: Math.round(target.scrollTop || window.scrollY),
+        clientHeight: target.clientHeight || window.innerHeight,
+        scrollHeight: target.scrollHeight || document.documentElement.scrollHeight,
+      });
+    };
+    window.addEventListener('keydown', onKey, true);
+    window.addEventListener('focusin', onFocus, true);
+    window.addEventListener('error', onError);
+    window.addEventListener('unhandledrejection', onRejection);
+    window.addEventListener('scroll', onScroll, true);
+    record('diagnostics_started', { appVersion: '2.4.0' });
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('focusin', onFocus, true);
+      window.removeEventListener('error', onError);
+      window.removeEventListener('unhandledrejection', onRejection);
+      window.removeEventListener('scroll', onScroll, true);
+    };
+  }, [diagnosticsEnabled]);
+
+  const handleDiagnosticsToggle = (enabled: boolean) => {
+    localStorage.setItem('metur_diagnostics_enabled', String(enabled));
+    setDiagnosticsEnabled(enabled);
+    if (!enabled) {
+      setDiagnosticEvents([]);
+      localStorage.removeItem('metur_diagnostics_events');
+    }
+  };
+
+  const handleExportDiagnostics = () => {
+    const report = {
+      product: 'Metur TV',
+      appVersion: '2.4.0',
+      exportedAt: new Date().toISOString(),
+      diagnosticsEnabled,
+      device: {
+        userAgent: navigator.userAgent,
+        screen: { width: window.screen.width, height: window.screen.height },
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        language: navigator.language,
+      },
+      privacy: 'No passwords, tokens, form values, media titles, server addresses, or URLs are collected.',
+      events: diagnosticEvents,
+    };
+    const filename = `metur-tv-diagnostics-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    const json = JSON.stringify(report, null, 2);
+    const nativeBridge = (window as any).MeturDiagnosticsBridge;
+    if (nativeBridge && typeof nativeBridge.saveReport === 'function') {
+      try {
+        const result = nativeBridge.saveReport(filename, json);
+        setDiagnosticsExportStatus(result || 'บันทึกรายงานลงโฟลเดอร์ Downloads แล้ว');
+        return;
+      } catch {
+        setDiagnosticsExportStatus('บันทึกผ่าน Android ไม่สำเร็จ กรุณาลองใหม่');
+        return;
+      }
+    }
+
+    try {
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = filename;
+      anchor.style.display = 'none';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 30000);
+      setDiagnosticsExportStatus('เริ่มดาวน์โหลดรายงานแล้ว');
+    } catch {
+      setDiagnosticsExportStatus('ดาวน์โหลดไม่สำเร็จบนอุปกรณ์นี้');
+    }
+  };
 
   // Active / Focused Item State for 10-ft TV experience
-  const [focusedItem, setFocusedItem] = useState<MediaItem>(INITIAL_FEATURED_ITEMS[0]);
+  const [focusedItem, setFocusedItem] = useState<MediaItem | null>(null);
   const [playingItem, setPlayingItem] = useState<MediaItem | null>(null);
   const [detailsItem, setDetailsItem] = useState<MediaItem | null>(null);
 
@@ -78,7 +196,61 @@ export default function App() {
   const [isServersOpen, setIsServersOpen] = useState(false);
   const [isPlaylistsOpen, setIsPlaylistsOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isApkModalOpen, setIsApkModalOpen] = useState(false);
+  const modalTriggerRef = useRef<HTMLElement | null>(null);
+  const modalWasOpenRef = useRef(false);
+
+  // Root-level BACK requires a deliberate double press within a short window.
+  const exitPromptTimeoutRef = useRef<number | null>(null);
+  const [exitPromptVisible, setExitPromptVisible] = useState(false);
+
+  const clearExitPrompt = () => {
+    if (exitPromptTimeoutRef.current !== null) {
+      window.clearTimeout(exitPromptTimeoutRef.current);
+      exitPromptTimeoutRef.current = null;
+    }
+    setExitPromptVisible(false);
+  };
+
+  const handleBackAction = () => {
+    if (playingItem) return;
+    if (detailsItem) {
+      setDetailsItem(null);
+      return;
+    }
+    if (isServersOpen || isPlaylistsOpen || isSettingsOpen) {
+      setIsServersOpen(false);
+      setIsPlaylistsOpen(false);
+      setIsSettingsOpen(false);
+      return;
+    }
+    if (currentTab !== 'home') {
+      clearExitPrompt();
+      setCurrentTab('home');
+      window.setTimeout(() => {
+        document.querySelector<HTMLElement>('[data-tv-nav="home"]')?.focus();
+      }, 50);
+      return;
+    }
+
+    if (exitPromptTimeoutRef.current !== null) {
+      clearExitPrompt();
+      const appControl = (window as any).MeturAppControl;
+      if (appControl && typeof appControl.exitApp === 'function') {
+        appControl.exitApp();
+      }
+      return;
+    }
+
+    setExitPromptVisible(true);
+    exitPromptTimeoutRef.current = window.setTimeout(() => {
+      exitPromptTimeoutRef.current = null;
+      setExitPromptVisible(false);
+    }, 2200);
+  };
+
+  useEffect(() => () => {
+    if (exitPromptTimeoutRef.current !== null) window.clearTimeout(exitPromptTimeoutRef.current);
+  }, []);
 
   // Quick search / filter & Voice Search
   const [searchQuery, setSearchQuery] = useState('');
@@ -87,8 +259,52 @@ export default function App() {
   // Quick Channel Number Tuning overlay feedback
   const [quickTuneNumber, setQuickTuneNumber] = useState<string | null>(null);
 
+  // Standard Android TV navigation uses real DOM focus; no simulated mouse cursor.
+
+  // Load persisted app metadata. Server credentials remain in Android Keystore.
+  useEffect(() => {
+    let active = true;
+    loadAppState()
+      .then((saved) => {
+        if (!active || !saved) return;
+        if (saved.settings) setSettings(saved.settings);
+        if (saved.servers) setServers(saved.servers.map((server) => ({
+          ...server,
+          username: undefined,
+          token: undefined,
+          status: 'disconnected' as const,
+        })));
+        if (saved.w3uItems) setW3uItems(saved.w3uItems);
+        if (saved.continueWatching) setContinueWatching(saved.continueWatching);
+        if (saved.liveChannels) setLiveChannels(saved.liveChannels);
+        if (saved.featuredItems) setFeaturedItems(saved.featuredItems);
+        if (saved.watchHistory) setWatchHistory(saved.watchHistory);
+      })
+      .catch((error) => console.error('[Metur TV] Local database load failed:', error))
+      .finally(() => {
+        if (active) setStorageReady(true);
+      });
+    return () => { active = false; };
+  }, []);
+
+  // Persist user data locally. Never write server usernames, API keys or tokens
+  // into IndexedDB; those require the native encrypted credential vault.
+  useEffect(() => {
+    if (!storageReady) return;
+    const safeServers = servers.map(({ username: _username, token: _token, ...server }) => server);
+    saveAppState({
+      settings,
+      servers: safeServers,
+      w3uItems,
+      continueWatching,
+      liveChannels,
+      featuredItems,
+      watchHistory,
+    }).catch((error) => console.error('[Metur TV] Local database save failed:', error));
+  }, [storageReady, settings, servers, w3uItems, continueWatching, liveChannels, featuredItems, watchHistory]);
+
   // Compute all favorites
-  const allMediaItems = [...featuredItems, ...liveChannels, ...w3uItems, ...continueWatching];
+  const allMediaItems = [...featuredItems, ...serverItems, ...liveChannels, ...w3uItems, ...continueWatching];
   const favoriteItems = allMediaItems.filter((item, index, self) =>
     item.isFavorite && self.findIndex((i) => i.id === item.id) === index
   );
@@ -101,12 +317,13 @@ export default function App() {
       list.map((item) => (item.id === targetItem.id ? { ...item, isFavorite: updatedStatus } : item));
 
     setFeaturedItems(updateList);
+    setServerItems(updateList);
     setLiveChannels(updateList);
     setW3uItems(updateList);
     setContinueWatching(updateList);
     setWatchHistory(updateList);
 
-    if (focusedItem.id === targetItem.id) {
+    if (focusedItem?.id === targetItem.id) {
       setFocusedItem({ ...focusedItem, isFavorite: updatedStatus });
     }
     if (detailsItem && detailsItem.id === targetItem.id) {
@@ -114,17 +331,60 @@ export default function App() {
     }
   };
 
-  // Start Playing Item with history tracking
-  const startPlaying = (item: MediaItem) => {
-    setPlayingItem(item);
-    // Add to history
+  // Start playback. Server access tokens are added only at playback time and
+  // never stored in the persistent watch-history record.
+  const startPlaying = async (item: MediaItem) => {
+    let playableItem = item;
+    if (item.serverId) {
+      const server = servers.find((entry) => entry.id === item.serverId);
+      if (!server) {
+        console.error('[Metur TV] Server metadata is missing for this item');
+        return;
+      }
+      try {
+        const streamUrl = await buildAuthenticatedStreamUrl(item, server);
+        playableItem = { ...item, streamUrl };
+      } catch (error) {
+        console.error('[Metur TV] Could not prepare authenticated playback:', error);
+        return;
+      }
+    }
+    setPlayingItem(playableItem);
     setWatchHistory((prev) => {
-      const filtered = prev.filter((i) => i.id !== item.id);
-      return [{ ...item, lastWatchedAt: Date.now() }, ...filtered];
+      const filtered = prev.filter((entry) => entry.id !== item.id);
+      const safeHistoryItem = item.serverId
+        ? { ...item, poster: '', backdrop: '', streamUrl: '' }
+        : item;
+      return [{ ...safeHistoryItem, lastWatchedAt: Date.now() }, ...filtered];
     });
   };
 
 
+  // Keep modal focus isolated and restore the exact invoking control on close.
+  useEffect(() => {
+    const modalOpen = isServersOpen || isPlaylistsOpen || isSettingsOpen || Boolean(detailsItem);
+    if (modalOpen && !modalWasOpenRef.current) {
+      const active = document.activeElement;
+      modalTriggerRef.current = active instanceof HTMLElement ? active : null;
+      modalWasOpenRef.current = true;
+      requestAnimationFrame(() => {
+        const root = document.querySelector<HTMLElement>('[data-tv-modal="true"]');
+        const first = root?.querySelector<HTMLElement>(
+          'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
+        );
+        first?.focus();
+        first?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      });
+    } else if (!modalOpen && modalWasOpenRef.current) {
+      modalWasOpenRef.current = false;
+      const trigger = modalTriggerRef.current;
+      modalTriggerRef.current = null;
+      requestAnimationFrame(() => {
+        if (trigger?.isConnected) trigger.focus();
+        else document.querySelector<HTMLElement>('[data-tv-nav="' + currentTab + '"]')?.focus();
+      });
+    }
+  }, [isServersOpen, isPlaylistsOpen, isSettingsOpen, detailsItem, currentTab]);
   // Android TV D-Pad Navigation Engine
   useEffect(() => {
     const selector = [
@@ -137,14 +397,25 @@ export default function App() {
     ].join(',');
 
     const getFocusable = (): HTMLElement[] => {
+      // A modal owns navigation while open. Outside a modal, keep off-screen
+      // shelf cards in the candidate set so D-pad movement can scroll to them.
+      const modalRoot = document.querySelector<HTMLElement>('.fixed.inset-0.z-50');
+      const scope: ParentNode = modalRoot || document;
+
       return Array.from(
-        document.querySelectorAll<HTMLElement>(selector)
+        scope.querySelectorAll<HTMLElement>(selector)
       ).filter((el) => {
-        return (
-          el.getClientRects().length > 0 &&
-          getComputedStyle(el).visibility !== 'hidden' &&
-          !el.closest('[aria-hidden="true"]')
-        );
+        if (
+          el.getClientRects().length === 0 ||
+          getComputedStyle(el).visibility === 'hidden' ||
+          el.closest('[aria-hidden="true"]') ||
+          el.closest('[inert]')
+        ) return false;
+
+        // Do not reject off-screen elements: elementFromPoint returns null for
+        // cards outside a horizontal shelf's viewport, which made the remote
+        // appear stuck at the last visible card.
+        return true;
       });
     };
 
@@ -155,13 +426,15 @@ export default function App() {
       const active = document.activeElement as HTMLElement | null;
 
       if (!active || active === document.body ||
-          !active.matches(selector)) {
-        const initial =
-          document.querySelector<HTMLElement>(
-            `[data-tv-nav="${currentTab}"]`
-          );
+          !active.matches(selector) || !elements.includes(active)) {
+        // When a modal is open, never send the first D-pad press back
+        // to the sidebar behind it. The modal's first enabled control owns focus.
+        const initial = document.querySelector<HTMLElement>('[data-tv-modal="true"]')
+          ? elements[0]
+          : document.querySelector<HTMLElement>(`[data-tv-nav="${currentTab}"]`) || elements[0];
 
-        (initial || elements[0])?.focus();
+        initial?.focus();
+        initial?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
         return;
       }
 
@@ -210,7 +483,11 @@ export default function App() {
 
           return {
             el,
-            score: primary + secondary * 1.5
+            // Prefer controls in the same semantic group (for example, the
+            // current shelf or channel grid) before crossing into another area.
+            // The large fallback penalty still permits leaving a group at its edge.
+            score: primary + secondary * 1.5 +
+              (active.closest('[data-tv-focus-group]') === el.closest('[data-tv-focus-group]') ? 0 : 10000)
           };
         })
         .filter(
@@ -229,10 +506,21 @@ export default function App() {
           block: 'nearest',
           inline: 'nearest'
         });
-      } else if (direction === 'ArrowUp') {
-        window.scrollBy({ top: -200, behavior: 'smooth' });
-      } else if (direction === 'ArrowDown') {
-        window.scrollBy({ top: 200, behavior: 'smooth' });
+      } else if (direction === 'ArrowUp' || direction === 'ArrowDown') {
+        // At the edge of a focus group, scroll its nearest scrollable panel.
+        let parent = active.parentElement;
+        while (parent && parent !== document.body) {
+          const style = getComputedStyle(parent);
+          if (/(auto|scroll|overlay)/.test(style.overflowY) &&
+              parent.scrollHeight > parent.clientHeight + 2) break;
+          parent = parent.parentElement;
+        }
+        const delta = direction === 'ArrowDown' ? 220 : -220;
+        if (parent && parent !== document.body) {
+          parent.scrollBy({ top: delta, behavior: 'smooth' });
+        } else {
+          window.scrollBy({ top: delta, behavior: 'smooth' });
+        }
       }
     };
 
@@ -241,13 +529,29 @@ export default function App() {
 
       const active = document.activeElement;
 
+      // Handle Back before text-input guards so the remote can always dismiss
+      // overlays or leave the app, even while a form field owns focus.
+      const isBack = e.key === 'Escape' || e.key === 'BrowserBack' || e.keyCode === 4;
+      if (isBack) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        handleBackAction();
+        return;
+      }
+
+      // Any other remote action cancels the pending exit confirmation.
+      if (exitPromptTimeoutRef.current !== null) clearExitPrompt();
+
       if (
         active instanceof HTMLInputElement ||
         active instanceof HTMLTextAreaElement ||
         active instanceof HTMLSelectElement ||
         (active instanceof HTMLElement && active.isContentEditable)
       ) {
-        return;
+        // Let text fields use left/right for caret movement, but retain D-pad
+        // up/down navigation so users can leave a focused field.
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') return;
       }
 
       // Quick channel tuning
@@ -275,61 +579,74 @@ export default function App() {
         return;
       }
 
-      // Four-direction navigation
+      // LEFT from content enters the navigation rail; RIGHT leaves it through
+      // the spatial focus engine. The rail expands when it receives focus.
+      const sidebar = document.querySelector<HTMLElement>('aside[data-tv-sidebar="true"]');
+      const modalIsOpen = Boolean(document.querySelector('[data-tv-modal="true"]'));
+      if (e.key === 'ArrowLeft' && !modalIsOpen && sidebar && !sidebar.contains(active as Node)) {
+        const navTarget = sidebar.querySelector<HTMLElement>('[data-tv-nav="' + currentTab + '"]');
+        if (navTarget) {
+          e.preventDefault();
+          e.stopPropagation();
+          navTarget.focus();
+          navTarget.scrollIntoView({ block: 'nearest' });
+          return;
+        }
+      }
+      // Standard Android TV navigation: move real focus between controls.
+      // Text fields keep native left/right caret movement; up/down can leave the field.
       if (
-        e.key === 'ArrowUp' ||
-        e.key === 'ArrowDown' ||
-        e.key === 'ArrowLeft' ||
-        e.key === 'ArrowRight'
+        e.key === 'ArrowUp' || e.key === 'ArrowDown' ||
+        e.key === 'ArrowLeft' || e.key === 'ArrowRight'
       ) {
+        const editing = active instanceof HTMLInputElement ||
+          active instanceof HTMLTextAreaElement ||
+          active instanceof HTMLSelectElement ||
+          (active instanceof HTMLElement && active.isContentEditable);
+        if (editing && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return;
         e.preventDefault();
-        moveFocus(e.key);
+        e.stopPropagation();
+        moveFocus(e.key as 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight');
         return;
       }
 
-      // Select focused element
+      // MainActivity forwards remote OK as a DOM key event. Activate the
+      // actually-focused control instead of hit-testing a simulated cursor.
       if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-
-        const focused = document.activeElement as HTMLElement;
-
-        if (
-          focused &&
-          focused !== document.body &&
-          focused.matches(selector)
-        ) {
-          focused.click();
-        } else {
-          document
-            .querySelector<HTMLElement>(
-              `[data-tv-nav="${currentTab}"]`
-            )
-            ?.focus();
+        if (active instanceof HTMLInputElement ||
+            active instanceof HTMLTextAreaElement ||
+            active instanceof HTMLSelectElement ||
+            (active instanceof HTMLElement && active.isContentEditable)) {
+          // Android WebView may require an explicit click after focus to show
+          // the on-screen keyboard for a TV remote's OK key.
+          active.focus();
+          active.click();
+          return;
         }
-
+        const focused = active instanceof HTMLElement ? active : null;
+        if (focused && focused !== document.body && focused.matches(selector)) {
+          e.preventDefault();
+          e.stopPropagation();
+          focused.click();
+        }
         return;
       }
 
-      // Back button
-      if (e.key === 'Escape') {
-        if (isServersOpen || isPlaylistsOpen ||
-            isSettingsOpen || detailsItem) {
-          setIsServersOpen(false);
-          setIsPlaylistsOpen(false);
-          setIsSettingsOpen(false);
-          setDetailsItem(null);
-        }
-      }
+      // Back is handled before form-field guards above.
     };
 
-    // Initial focus on active sidebar item
+    // Focus the active modal first; otherwise focus the selected sidebar tab.
     const initialTimer = window.setTimeout(() => {
-      if (document.activeElement === document.body) {
-        document
-          .querySelector<HTMLElement>(
-            `[data-tv-nav="${currentTab}"]`
-          )
-          ?.focus();
+      if (document.activeElement === document.body ||
+          document.activeElement === document.documentElement) {
+        const modalRoot = document.querySelector<HTMLElement>('[data-tv-modal="true"]');
+        const modalTarget = modalRoot?.querySelector<HTMLElement>(
+          'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])'
+        );
+        const target = modalTarget ||
+          document.querySelector<HTMLElement>(`[data-tv-nav="${currentTab}"]`);
+        target?.focus();
+        target?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
       }
     }, 300);
 
@@ -348,7 +665,8 @@ export default function App() {
     detailsItem,
     liveChannels,
     settings.quickChannelTuning,
-    currentTab
+    currentTab,
+    handleBackAction,
   ]);
 
 
@@ -360,32 +678,22 @@ export default function App() {
     window.scrollBy({ top: 250, behavior: 'smooth' });
   };
   const handleRemoteLeft = () => {
-    const tabs: TabType[] = ['home', 'live', 'movies', 'series', 'favorites', 'history', 'servers', 'playlists', 'settings'];
-    const currentIdx = tabs.indexOf(currentTab);
-    if (currentIdx > 0) {
-      setCurrentTab(tabs[currentIdx - 1]);
-    }
+    document.querySelector<HTMLElement>('[data-tv-nav="' + currentTab + '"]')?.focus();
   };
   const handleRemoteRight = () => {
-    const tabs: TabType[] = ['home', 'live', 'movies', 'series', 'favorites', 'history', 'servers', 'playlists', 'settings'];
-    const currentIdx = tabs.indexOf(currentTab);
-    if (currentIdx < tabs.length - 1) {
-      setCurrentTab(tabs[currentIdx + 1]);
+    const sidebar = document.querySelector<HTMLElement>('aside[data-tv-sidebar="true"]');
+    if (sidebar?.contains(document.activeElement)) {
+      const mainTarget = document.querySelector<HTMLElement>('main button:not(:disabled), main a[href], main [tabindex]:not([tabindex="-1"])');
+      mainTarget?.focus();
+      mainTarget?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     }
   };
   const handleRemoteSelect = () => {
-    startPlaying(focusedItem);
+    if (focusedItem) startPlaying(focusedItem);
   };
   const handleRemoteBack = () => {
     if (playingItem) setPlayingItem(null);
-    else if (detailsItem) setDetailsItem(null);
-    else if (isServersOpen || isPlaylistsOpen || isSettingsOpen) {
-      setIsServersOpen(false);
-      setIsPlaylistsOpen(false);
-      setIsSettingsOpen(false);
-    } else {
-      setCurrentTab('home');
-    }
+    else handleBackAction();
   };
   const handleRemoteHome = () => {
     setPlayingItem(null);
@@ -397,7 +705,7 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
   const handleRemotePlayPause = () => {
-    if (!playingItem) {
+    if (!playingItem && focusedItem) {
       startPlaying(focusedItem);
     }
   };
@@ -407,20 +715,37 @@ export default function App() {
     setW3uItems((prev) => [...newItems, ...prev]);
   };
 
-  // Add Server handler
-  const handleAddServer = (newServer: MediaServerConfig) => {
-    setServers((prev) => [newServer, ...prev]);
+  // Add a server only after the modal has completed the real connection attempt.
+  const handleAddServer = (newServer: MediaServerConfig, items: MediaItem[]) => {
+    setServers((prev) => [newServer, ...prev.filter((server) => server.id !== newServer.id)]);
+    setServerItems((prev) => [...items, ...prev.filter((item) => item.serverId !== newServer.id)]);
+  };
+
+  const handleConnectServer = async (server: MediaServerConfig) => {
+    setServers((prev) => prev.map((entry) => entry.id === server.id ? { ...entry, status: 'connecting' } : entry));
+    try {
+      const username = await getServerCredential(server.id, 'username') ?? '';
+      const token = await getServerCredential(server.id, 'token') ?? '';
+      const result = await connectJellyfinOrEmby(server, username, token, true);
+      setServers((prev) => prev.map((entry) => entry.id === server.id ? result.server : entry));
+      setServerItems((prev) => [...result.items, ...prev.filter((item) => item.serverId !== server.id)]);
+    } catch (error) {
+      setServers((prev) => prev.map((entry) => entry.id === server.id
+        ? { ...entry, status: 'error', itemCount: 0 }
+        : entry));
+      console.error('[Metur TV] Server connection failed:', error);
+    }
   };
 
   const handleRemoveServer = (id: string) => {
-    setServers((prev) => prev.filter((s) => s.id !== id));
+    deleteServerCredentials(id).catch((error) => {
+      console.error('[Metur TV] Could not clear encrypted credentials:', error);
+    }).finally(() => {
+      setServers((prev) => prev.filter((server) => server.id !== id));
+      setServerItems((prev) => prev.filter((item) => item.serverId !== id));
+    });
   };
 
-  const handleSyncServer = (id: string) => {
-    setServers((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, lastSync: 'เพิ่งซิงค์ข้อมูลใหม่' } : s))
-    );
-  };
 
   // Navigation tab switch router
   const handleSelectTab = (tab: TabType) => {
@@ -450,7 +775,7 @@ export default function App() {
   };
 
   return (
-    <div className="relative min-h-screen bg-[#050608] text-slate-100 flex overflow-x-hidden">
+    <div className="relative min-h-screen bg-[#080B1A] text-slate-100 flex overflow-x-hidden">
       {/* 1. Ambient Background reacting to current focused poster */}
       <BackdropAmbient
         backdropUrl={focusedItem?.backdrop || focusedItem?.poster}
@@ -485,57 +810,26 @@ export default function App() {
             </span>
           </div>
 
-          {/* Zone 2: Voice Search bar with Web Speech API */}
-          <div className="flex items-center gap-3 flex-1 max-w-md">
-            <VoiceSearch
-              searchQuery={searchQuery}
-              onSearchChange={(q) => setSearchQuery(q)}
-              lang={settings.language}
-              isListeningExternal={isVoiceListening}
-              onListeningChange={(l) => setIsVoiceListening(l)}
-              placeholder={
-                settings.language === 'th'
-                  ? 'ค้นหาด้วยเสียง หรือพิมพ์ชื่อสื่อ...'
-                  : 'Voice search or type media title...'
-              }
-            />
-          </div>
-
-          {/* Zone 3: Primary Action buttons (Servers, Playlists W3U, Settings) */}
-          <div className="flex items-center gap-2.5 shrink-0">
-            <button
-              onClick={() => setIsPlaylistsOpen(true)}
-              className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold backdrop-blur-md transition-all hover:scale-102 border border-white/10 whitespace-nowrap"
-            >
-              <ListPlus className="w-4 h-4 text-sky-400" />
-              <span>เพลย์ลิสต์ W3U / M3U</span>
-            </button>
-
-            <button
-              onClick={() => setIsServersOpen(true)}
-              className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-white text-black text-xs font-bold hover:bg-slate-200 transition-all hover:scale-102 shadow-lg shadow-white/5 whitespace-nowrap"
-            >
-              <Server className="w-4 h-4" />
-              <span>เซิร์ฟเวอร์ ({servers.length})</span>
-            </button>
-
-            <button
-              onClick={() => setIsApkModalOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-emerald-500/20 to-teal-500/20 hover:from-emerald-500/30 hover:to-teal-500/30 text-emerald-300 text-xs font-semibold backdrop-blur-md transition-all hover:scale-102 border border-emerald-500/30 whitespace-nowrap"
-              title="สร้างไฟล์ APK สำหรับติดตั้งบน Android TV"
-            >
-              <Smartphone className="w-4 h-4" />
-              <span>สร้างไฟล์ APK</span>
-            </button>
-
-            <button
-              onClick={() => setIsSettingsOpen(true)}
-              className="p-2 rounded-xl bg-white/5 hover:bg-white/15 text-slate-300 hover:text-white transition-colors border border-white/5"
-              title="ตั้งค่า Android TV"
-            >
-              <SlidersHorizontal className="w-4 h-4" />
-            </button>
-          </div>
+          {/* Search is shown after the user has added media */}
+          {allMediaItems.length > 0 && (
+            <div className="flex items-center gap-3 flex-1 max-w-md">
+              <VoiceSearch
+                searchQuery={searchQuery}
+                onSearchChange={(q) => setSearchQuery(q)}
+                lang={settings.language}
+                isListeningExternal={isVoiceListening}
+                onListeningChange={(l) => setIsVoiceListening(l)}
+                placeholder={settings.language === 'th' ? 'ค้นหาสื่อ...' : 'Search media...'}
+              />
+            </div>
+          )}
+          {allMediaItems.length > 0 && (
+            <div className="flex items-center gap-2.5 shrink-0">
+              <button onClick={() => setIsPlaylistsOpen(true)} className="px-3.5 py-2 rounded-xl bg-white/10 text-white text-xs font-semibold border border-white/10">เพลย์ลิสต์</button>
+              <button onClick={() => setIsServersOpen(true)} className="px-3.5 py-2 rounded-xl bg-white text-black text-xs font-bold">เซิร์ฟเวอร์ ({servers.length})</button>
+              <button onClick={() => setIsSettingsOpen(true)} className="p-2 rounded-xl bg-white/5 text-slate-300 border border-white/5" title="ตั้งค่า Android TV"><SlidersHorizontal className="w-4 h-4" /></button>
+            </div>
+          )}
         </header>
 
         {/* Quick Tune Channel Number Indicator */}
@@ -577,8 +871,40 @@ export default function App() {
               </div>
             )}
 
+            {allMediaItems.length === 0 ? (
+              <div className="flex-1 min-h-[55vh] flex flex-col items-center justify-center text-center gap-5">
+                <div className="w-20 h-20 rounded-3xl bg-white/[0.04] border border-white/10 flex items-center justify-center">
+                  <Tv className="w-9 h-9 text-slate-500" />
+                </div>
+                <div className="max-w-lg">
+                  <h1 className="text-2xl font-semibold text-white">
+                    {settings.language === 'th' ? 'ยินดีต้อนรับสู่ Metur TV' : 'Welcome to Metur TV'}
+                  </h1>
+                  <p className="text-sm text-slate-400 mt-2 leading-relaxed">
+                    {settings.language === 'th'
+                      ? 'ยังไม่มีรายการในคลังของคุณ เพิ่มเพลย์ลิสต์หรือเชื่อมต่อมีเดียเซิร์ฟเวอร์เพื่อเริ่มต้น'
+                      : 'Your library is empty. Add a playlist or connect a media server to get started.'}
+                  </p>
+                </div>
+                <div className="flex flex-wrap justify-center gap-3">
+                  <button
+                    onClick={() => setIsPlaylistsOpen(true)}
+                    className="px-5 py-3 rounded-xl bg-white text-black text-sm font-semibold hover:bg-slate-200 transition-colors"
+                  >
+                    + เพิ่ม Playlist / Stream URL
+                  </button>
+                  <button
+                    onClick={() => setIsServersOpen(true)}
+                    className="px-5 py-3 rounded-xl bg-white/10 border border-white/10 text-white text-sm font-semibold hover:bg-white/15 transition-colors"
+                  >
+                    + เพิ่ม Media Server
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
             {/* Dynamic Hero Banner */}
-            {!searchQuery && (
+            {!searchQuery && focusedItem && (
               <HeroBanner
                 item={focusedItem}
                 onPlay={(item) => startPlaying(item)}
@@ -647,14 +973,16 @@ export default function App() {
             <MediaShelf
               title={settings.language === 'th' ? 'ภาพยนตร์และซีรีส์เด่น' : 'Featured Media'}
               subtitle="Dolby Vision · Atmos · Ultra HD"
-              items={filterMediaList(featuredItems)}
+              items={filterMediaList([...featuredItems, ...serverItems])}
               aspectRatio="poster"
               focusedItemId={focusedItem?.id}
               onSelect={(item) => startPlaying(item)}
               onFocusItem={(item) => setFocusedItem(item)}
               onToggleFavorite={handleToggleFavorite}
             />
-          </div>
+
+              </>
+            )}          </div>
         )}
 
         {/* ================= VIEW: LIVE TV / IPTV ================= */}
@@ -702,7 +1030,7 @@ export default function App() {
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-5 pt-2">
-              {[...featuredItems.filter((i) => i.type === 'movie'), ...w3uItems].map((item) => (
+              {[...featuredItems.filter((i) => i.type === 'movie'), ...serverItems.filter((i) => i.type === 'movie'), ...w3uItems].map((item) => (
                 <div
                   key={item.id}
                   onClick={() => startPlaying(item)}
@@ -761,7 +1089,7 @@ export default function App() {
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-5 pt-2">
-              {featuredItems
+              {[...featuredItems, ...serverItems]
                 .filter((i) => i.type === 'series' || i.type === 'episode')
                 .map((item) => (
                   <div
@@ -951,8 +1279,8 @@ export default function App() {
         isOpen={isServersOpen}
         onClose={() => setIsServersOpen(false)}
         onAddServer={handleAddServer}
+        onConnectServer={handleConnectServer}
         onRemoveServer={handleRemoveServer}
-        onSyncServer={handleSyncServer}
       />
 
       <PlaylistsModal
@@ -967,12 +1295,13 @@ export default function App() {
         onClose={() => setIsSettingsOpen(false)}
         settings={settings}
         onUpdateSettings={(newVals) => setSettings({ ...settings, ...newVals })}
+        diagnosticsEnabled={diagnosticsEnabled}
+        diagnosticEventCount={diagnosticEvents.length}
+        onDiagnosticsToggle={handleDiagnosticsToggle}
+        onExportDiagnostics={handleExportDiagnostics}
+        diagnosticsExportStatus={diagnosticsExportStatus}
       />
 
-      <ApkBuildModal
-        isOpen={isApkModalOpen}
-        onClose={() => setIsApkModalOpen(false)}
-      />
 
       <MediaDetailsModal
         item={detailsItem}
@@ -981,6 +1310,15 @@ export default function App() {
         onPlay={(item) => startPlaying(item)}
         onToggleFavorite={handleToggleFavorite}
       />
+
+      {exitPromptVisible && !playingItem && (
+        <div role="status" aria-live="assertive"
+          className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[120] flex items-center gap-3 rounded-2xl border border-cyan-300/30 bg-[#10152B]/95 px-6 py-4 shadow-[0_0_36px_rgba(99,102,241,0.28)] backdrop-blur-xl">
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-cyan-400 text-white font-bold">M</span>
+          <span className="text-base font-semibold text-white">กด BACK อีกครั้งเพื่อออก</span>
+          <span className="h-1.5 w-1.5 rounded-full bg-cyan-300 animate-pulse" />
+        </div>
+      )}
 
       {/* 6. Virtual Remote Controller for testing Android TV D-Pad directly */}
       <VirtualRemote
