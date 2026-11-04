@@ -78,3 +78,30 @@ test('W3U: supports a root array and rejects malformed JSON', () => {
   assert.equal(result.items[0].group, 'Imported');
   assert.throws(() => parseW3U('{not-json'), /รูปแบบไฟล์ W3U ไม่ถูกต้อง/);
 });
+
+test('Playlist resolver detects M3U regardless of URL/file extension', async () => {
+  const { resolvePlaylistContent } = await import('../src/utils/playlistResolver');
+  const result = resolvePlaylistContent('#EXTM3U\\n#EXTINF:-1,News\\nhttps://stream.test/news');
+  assert.equal(result.type, 'm3u');
+  assert.equal(result.items[0].title, 'News');
+});
+test('Playlist resolver detects W3U JSON without a .w3u extension', async () => {
+  const { resolvePlaylistContent } = await import('../src/utils/playlistResolver');
+  const result = resolvePlaylistContent(JSON.stringify({ stations: [{ name: 'Radio', url: 'https://stream.test/radio' }] }));
+  assert.equal(result.type, 'w3u');
+  assert.equal(result.items[0].title, 'Radio');
+});
+test('Playlist resolver extracts embedded M3U and W3U from HTML wrappers', async () => {
+  const { resolvePlaylistContent } = await import('../src/utils/playlistResolver');
+  const m3u = resolvePlaylistContent('<html><body><pre>#EXTM3U\\n#EXTINF:-1,HTML News\\nhttps://stream.test/html</pre></body></html>');
+  assert.equal(m3u.type, 'm3u');
+  assert.equal(m3u.items[0].title, 'HTML News');
+  const payload = JSON.stringify({ stations: [{ name: 'Embedded', url: 'https://stream.test/embedded' }] });
+  const w3u = resolvePlaylistContent('<html><body><textarea>' + payload + '</textarea></body></html>');
+  assert.equal(w3u.type, 'w3u');
+  assert.equal(w3u.items[0].title, 'Embedded');
+});
+test('Playlist resolver rejects HTML pages without an embedded playlist', async () => {
+  const { resolvePlaylistContent } = await import('../src/utils/playlistResolver');
+  assert.throws(() => resolvePlaylistContent('<html><body><h1>Please sign in</h1></body></html>'), /ไม่พบข้อมูล Playlist/);
+});

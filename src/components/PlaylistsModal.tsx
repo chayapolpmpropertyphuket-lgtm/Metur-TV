@@ -4,6 +4,7 @@ import { parseW3U } from '../utils/w3uParser';
 import { parseM3U } from '../utils/m3uParser';
 import { loadPlaylists, savePlaylists, PersistedPlaylist } from '../services/localStore';
 import { nativeRequest } from '../services/nativeHttp';
+import { resolvePlaylistContent } from '../utils/playlistResolver';
 import {
   ListPlus,
   Tv,
@@ -76,13 +77,6 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
   const handleImportFile = async (file: File | undefined, type: 'w3u' | 'm3u') => {
     if (!file) return;
     try {
-      const extension = file.name.split('.').pop()?.toLowerCase();
-      const allowed = type === 'w3u' ? ['w3u', 'json'] : ['m3u', 'm3u8'];
-      if (!extension || !allowed.includes(extension)) {
-        throw new Error(type === 'w3u'
-          ? 'กรุณาเลือกไฟล์ .w3u หรือ .json เท่านั้น'
-          : 'กรุณาเลือกไฟล์ .m3u หรือ .m3u8 เท่านั้น');
-      }
       if (file.size === 0) throw new Error('ไฟล์นี้ไม่มีข้อมูล');
       if (file.size > 8 * 1024 * 1024) {
         throw new Error('ไฟล์มีขนาดเกิน 8 MB กรุณาใช้ Playlist ที่มีขนาดเล็กลง');
@@ -91,9 +85,8 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
       const content = await file.text();
       if (!content.trim()) throw new Error('ไฟล์นี้ไม่มีเนื้อหา Playlist');
       const name = playlistName.trim() || file.name.replace(/\.[^.]+$/, '');
-      const parsed = type === 'w3u'
-        ? parseW3U(content, name)
-        : parseM3U(content, name);
+      const parsed = resolvePlaylistContent(content, name);
+      const detectedType = parsed.type;
       if (parsed.items.length === 0) {
         throw new Error('ไม่พบรายการสื่อในไฟล์ หรือโครงสร้าง Playlist ไม่ถูกต้อง');
       }
@@ -101,7 +94,7 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
       const entry: PlaylistEntry = {
         id: makePlaylistId(),
         name,
-        type,
+        type: detectedType,
         source: 'content',
         itemCount: parsed.items.length,
         groups: parsed.groups,
@@ -163,9 +156,8 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
       let nameFromUrl = parsedUrl.pathname.split('/').pop() || 'Remote Playlist';
       try { nameFromUrl = decodeURIComponent(nameFromUrl); } catch { /* Keep the encoded filename. */ }
       const name = playlistName.trim() || nameFromUrl;
-      const parsed = type === 'w3u'
-        ? parseW3U(content, name, parsedUrl.toString())
-        : parseM3U(content, name, parsedUrl.toString());
+      const parsed = resolvePlaylistContent(content, name, parsedUrl.toString());
+      const detectedType = parsed.type;
 
       if (parsed.items.length === 0) {
         throw new Error('ไม่พบรายการสื่อใน Playlist หรือรูปแบบไฟล์ไม่ตรงกับประเภทที่เลือก');
@@ -174,7 +166,7 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
       const entry: PlaylistEntry = {
         id: makePlaylistId(),
         name,
-        type,
+        type: detectedType,
         source: 'url',
         sourceUrl: parsedUrl.toString(),
         itemCount: parsed.items.length,
@@ -188,7 +180,7 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
       onImportItems(parsed.items, entry.name);
       setUrlInput('');
       setPlaylistName('');
-      setStatusMessage({ text: `นำเข้า ${type.toUpperCase()} สำเร็จ ${parsed.items.length} รายการ`, type: 'success' });
+      setStatusMessage({ text: `ตรวจพบ ${detectedType.toUpperCase()} · นำเข้าสำเร็จ ${parsed.items.length} รายการ`, type: 'success' });
       setActiveTab('manage');
     } catch (error) {
       const message = error instanceof Error
@@ -318,14 +310,13 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
       if (!content.trim() || /^\s*<(?:!doctype\s+html|html|head|body)\b/i.test(content)) {
         throw new Error('URL ไม่ได้ส่งข้อมูล Playlist ที่ถูกต้องกลับมา');
       }
-      const parsed = playlist.type === 'w3u'
-        ? parseW3U(content, playlist.name, parsedUrl.toString())
-        : parseM3U(content, playlist.name, parsedUrl.toString());
+      const parsed = resolvePlaylistContent(content, playlist.name, parsedUrl.toString());
       if (parsed.items.length === 0) {
         throw new Error('ไม่พบรายการสื่อใหม่ จึงเก็บข้อมูลเดิมไว้เพื่อป้องกันข้อมูลสูญหาย');
       }
       const updated: PlaylistEntry = {
         ...playlist,
+        type: parsed.type,
         itemCount: parsed.items.length,
         groups: parsed.groups,
         addedAt: `อัปเดตล่าสุด ${new Date().toLocaleString()}`,
