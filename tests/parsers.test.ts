@@ -81,7 +81,7 @@ test('W3U: supports a root array and rejects malformed JSON', () => {
 
 test('Playlist resolver detects M3U regardless of URL/file extension', async () => {
   const { resolvePlaylistContent } = await import('../src/utils/playlistResolver');
-  const result = resolvePlaylistContent('#EXTM3U\\n#EXTINF:-1,News\\nhttps://stream.test/news');
+  const result = resolvePlaylistContent('#EXTM3U\n#EXTINF:-1,News\nhttps://stream.test/news');
   assert.equal(result.type, 'm3u');
   assert.equal(result.items[0].title, 'News');
 });
@@ -93,7 +93,7 @@ test('Playlist resolver detects W3U JSON without a .w3u extension', async () => 
 });
 test('Playlist resolver extracts embedded M3U and W3U from HTML wrappers', async () => {
   const { resolvePlaylistContent } = await import('../src/utils/playlistResolver');
-  const m3u = resolvePlaylistContent('<html><body><pre>#EXTM3U\\n#EXTINF:-1,HTML News\\nhttps://stream.test/html</pre></body></html>');
+  const m3u = resolvePlaylistContent('<html><body><pre>#EXTM3U\n#EXTINF:-1,HTML News\nhttps://stream.test/html</pre></body></html>');
   assert.equal(m3u.type, 'm3u');
   assert.equal(m3u.items[0].title, 'HTML News');
   const payload = JSON.stringify({ stations: [{ name: 'Embedded', url: 'https://stream.test/embedded' }] });

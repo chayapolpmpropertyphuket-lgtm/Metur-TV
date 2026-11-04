@@ -150,9 +150,6 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
 
       const content = response.body;
       if (!content.trim()) throw new Error('เซิร์ฟเวอร์ตอบกลับเป็นไฟล์ว่าง');
-      if (/^\s*<(?:!doctype\s+html|html|head|body)\b/i.test(content)) {
-        throw new Error('URL นี้ส่งหน้าเว็บ HTML กลับมา ไม่ใช่ไฟล์ Playlist (อาจต้องใช้ลิงก์ดาวน์โหลดโดยตรงหรือเข้าสู่ระบบก่อน)');
-      }
       let nameFromUrl = parsedUrl.pathname.split('/').pop() || 'Remote Playlist';
       try { nameFromUrl = decodeURIComponent(nameFromUrl); } catch { /* Keep the encoded filename. */ }
       const name = playlistName.trim() || nameFromUrl;
@@ -307,9 +304,7 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
           : response.error || 'ไม่สามารถเชื่อมต่อ URL ได้');
       }
       const content = response.body;
-      if (!content.trim() || /^\s*<(?:!doctype\s+html|html|head|body)\b/i.test(content)) {
-        throw new Error('URL ไม่ได้ส่งข้อมูล Playlist ที่ถูกต้องกลับมา');
-      }
+      if (!content.trim()) throw new Error('เซิร์ฟเวอร์ตอบกลับเป็นข้อมูลว่าง');
       const parsed = resolvePlaylistContent(content, playlist.name, parsedUrl.toString());
       if (parsed.items.length === 0) {
         throw new Error('ไม่พบรายการสื่อใหม่ จึงเก็บข้อมูลเดิมไว้เพื่อป้องกันข้อมูลสูญหาย');
