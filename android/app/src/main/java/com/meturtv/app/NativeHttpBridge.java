@@ -100,6 +100,7 @@ public final class NativeHttpBridge {
             JSONObject result = new JSONObject();
             result.put("status", status);
             result.put("body", response);
+            result.put("url", connection.getURL().toString());
             result.put("ok", status >= 200 && status < 300);
             return result.toString();
         } catch (Exception exception) {

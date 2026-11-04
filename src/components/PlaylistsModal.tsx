@@ -124,6 +124,7 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
     try {
       let content = input.trim();
       let sourceUrl: string | undefined;
+      let contentBaseUrl: string | undefined;
       let source: 'url' | 'content' = 'content';
       if (/^https?:\/\//i.test(content)) {
         const parsedUrl = new URL(content);
@@ -145,31 +146,43 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
           if (!listing.ok) throw new Error('Gofile ไม่อนุญาตให้แอปอ่านรายการไฟล์ผ่าน API ในขณะนี้ กรุณาใช้ลิงก์ดาวน์โหลดไฟล์ Playlist โดยตรง หรือแชร์ไฟล์แบบสาธารณะ');
           const payload = listing.data ?? JSON.parse(listing.body);
           const root = (payload as any).data ?? payload;
-          const children = Array.isArray(root.childs) ? root.childs : [];
           const candidates: any[] = [];
-          const collect = (nodes: any[]) => nodes.forEach((node) => {
-            if (node?.type === 'folder' && Array.isArray(node.childs)) collect(node.childs);
-            else if (node?.type === 'file' && /\.(?:w3u|m3u8?)$/i.test(String(node.name || ''))) candidates.push(node);
-          });
-          collect(children);
+          const visited = new Set<string>();
+          const collect = (node: any) => {
+            if (!node || typeof node !== 'object') return;
+            const identity = String(node.id || '');
+            if (identity && visited.has(identity)) return;
+            if (identity) visited.add(identity);
+            const children = node.childs;
+            if (children && typeof children === 'object') {
+              const values = Array.isArray(children) ? children : Object.values(children);
+              values.forEach(collect);
+            }
+            if (node.type === 'file' && /\.(?:w3u|m3u8?)$/i.test(String(node.name || ''))) candidates.push(node);
+          };
+          collect(root);
           if (!candidates.length) throw new Error('Gofile เปิดโฟลเดอร์ได้ แต่ไม่พบไฟล์ .w3u, .m3u หรือ .m3u8 ภายใน');
           const selected = candidates.length === 1 ? candidates[0] : candidates.find((node) => /\.(?:w3u|m3u8?)$/i.test(String(node.name || '')));
           const downloadUrl = String(selected.link || selected.directLink || '');
           if (!downloadUrl) throw new Error('พบไฟล์ Playlist ใน Gofile แต่ไม่มีลิงก์ดาวน์โหลดโดยตรง');
           sourceUrl = downloadUrl;
-          content = (await nativeRequest(downloadUrl, 'GET', { Accept: 'text/plain, application/json, */*' }, undefined, { allowRedirects: true })).body;
+          const fileResponse = await nativeRequest(downloadUrl, 'GET', { Accept: 'text/plain, application/json, */*' }, undefined, { allowRedirects: true });
+          if (!fileResponse.ok) throw new Error(`ดาวน์โหลดไฟล์ Playlist จาก Gofile ไม่สำเร็จ (HTTP ${fileResponse.status})`);
+          content = fileResponse.body;
+          contentBaseUrl = fileResponse.url || downloadUrl;
         } else {
           const response = await nativeRequest(content, 'GET',
             { Accept: 'application/x-mpegURL, application/vnd.apple.mpegurl, text/plain, application/json, */*' },
             undefined, { allowRedirects: true });
           if (!response.ok) throw new Error(response.status > 0 ? `ดาวน์โหลดไม่สำเร็จ (HTTP ${response.status})` : response.error || 'ไม่สามารถเชื่อมต่อ URL ได้');
           content = response.body;
+          contentBaseUrl = response.url || parsedUrl.toString();
         }
       }
       if (!content.trim()) throw new Error('ไม่พบเนื้อหา Playlist ในข้อมูลที่ได้รับ');
       const inferredName = file?.name || (sourceUrl ? new URL(sourceUrl).pathname.split('/').pop() : 'Imported Playlist') || 'Imported Playlist';
       const name = playlistName.trim() || inferredName.replace(/\.(?:w3u|m3u8?)$/i, '');
-      const parsed = resolvePlaylistContent(content, name, sourceUrl);
+      const parsed = resolvePlaylistContent(content, name, contentBaseUrl || sourceUrl);
       if (!parsed.items.length) throw new Error('ไม่พบรายการสื่อใน Playlist');
       const entry: PlaylistEntry = {
         id: makePlaylistId(), name: playlistName.trim() || parsed.name || name,
@@ -307,7 +320,7 @@ export const PlaylistsModal: React.FC<PlaylistsModalProps> = ({
       }
       const content = response.body;
       if (!content.trim()) throw new Error('เซิร์ฟเวอร์ตอบกลับเป็นข้อมูลว่าง');
-      const parsed = resolvePlaylistContent(content, playlist.name, parsedUrl.toString());
+      const parsed = resolvePlaylistContent(content, playlist.name, response.url || parsedUrl.toString());
       if (parsed.items.length === 0) {
         throw new Error('ไม่พบรายการสื่อใหม่ จึงเก็บข้อมูลเดิมไว้เพื่อป้องกันข้อมูลสูญหาย');
       }

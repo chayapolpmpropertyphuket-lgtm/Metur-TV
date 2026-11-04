@@ -14,6 +14,8 @@ export interface NativeHttpResponse<T = unknown> {
   body: string;
   ok: boolean;
   error?: string;
+  /** Final URL after HTTP redirects, when available. */
+  url?: string;
   data?: T;
 }
 
