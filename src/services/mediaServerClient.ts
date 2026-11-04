@@ -153,6 +153,75 @@ export async function connectJellyfinOrEmby(
   };
 }
 
+
+export async function connectJellyfinQuickConnect(
+  server: MediaServerConfig,
+  onCode: (code: string) => void,
+): Promise<MediaServerConnectionResult> {
+  if (server.type !== 'jellyfin') {
+    throw new Error('Quick Connect รองรับ Jellyfin ที่เปิดใช้งาน Quick Connect ใน Server Dashboard');
+  }
+  const headers = { 'X-Emby-Authorization': clientHeader };
+  const initiated = await nativeRequest<{ Code?: string; Secret?: string; Authenticated?: boolean }>(
+    apiUrl(server.url, 'QuickConnect/Initiate'), 'POST', headers,
+  );
+  const initiation = initiated.data ?? parseJson<{ Code?: string; Secret?: string; Authenticated?: boolean }>(
+    initiated.body, 'ข้อมูล Quick Connect จาก Jellyfin ไม่ถูกต้อง',
+  );
+  if (!initiated.ok || !initiation.Secret || !initiation.Code) {
+    throw new Error('เริ่ม Quick Connect ไม่สำเร็จ กรุณาตรวจ URL และเปิด Quick Connect ใน Jellyfin Dashboard');
+  }
+
+  onCode(initiation.Code);
+  const deadline = Date.now() + 120000;
+  let authenticated = Boolean(initiation.Authenticated);
+  while (!authenticated && Date.now() < deadline) {
+    await new Promise((resolve) => window.setTimeout(resolve, 2000));
+    const status = await nativeRequest<{ Authenticated?: boolean }>(
+      apiUrl(server.url, `QuickConnect/Connect?secret=${encodeURIComponent(initiation.Secret)}`),
+      'GET', headers,
+    );
+    if (status.ok) {
+      const payload = status.data ?? parseJson<{ Authenticated?: boolean }>(
+        status.body, 'สถานะ Quick Connect ไม่ถูกต้อง',
+      );
+      authenticated = payload.Authenticated === true;
+    }
+  }
+  if (!authenticated) {
+    throw new Error('หมดเวลารอการอนุมัติ Quick Connect (2 นาที) กรุณาเริ่มใหม่');
+  }
+
+  const auth = await nativeRequest<AuthResult>(
+    apiUrl(server.url, 'Users/AuthenticateWithQuickConnect'),
+    'POST',
+    headers,
+    { Secret: initiation.Secret },
+  );
+  if (!auth.ok) throw new Error(`Jellyfin ยืนยัน Quick Connect ไม่สำเร็จ (HTTP ${auth.status})`);
+  const credentials = auth.data ?? parseJson<AuthResult>(auth.body, 'ข้อมูลยืนยันตัวตน Quick Connect ไม่ถูกต้อง');
+  const accessToken = String(credentials.AccessToken ?? '');
+  const user = credentials.User ?? {};
+  const userId = String(user.Id ?? '');
+  if (!accessToken || !userId) throw new Error('Quick Connect สำเร็จแต่ไม่พบ Access Token หรือ User ID');
+
+  const itemsResponse = await nativeRequest<ServerItemsResult>(
+    apiUrl(server.url, `Users/${encodeURIComponent(userId)}/Items?Recursive=true&IncludeItemTypes=Movie,Episode&Fields=Overview,Genres,ProductionYear,RunTimeTicks,ImageTags,BackdropImageTags&SortBy=DateCreated&SortOrder=Descending&Limit=300`),
+    'GET',
+    { 'X-Emby-Token': accessToken, ...headers },
+  );
+  if (!itemsResponse.ok) throw new Error(`เชื่อมต่อสำเร็จ แต่ดึงรายการสื่อไม่สำเร็จ (HTTP ${itemsResponse.status})`);
+  const payload = itemsResponse.data ?? parseJson<ServerItemsResult>(itemsResponse.body, 'รายการสื่อจาก Jellyfin ไม่ถูกต้อง');
+  const items = (payload.Items ?? []).map((item) => mapServerItem(item, server))
+    .filter((item): item is MediaItem => item !== null);
+  await saveServerCredentials(server.id, { token: accessToken });
+  return {
+    server: { ...server, username: undefined, token: undefined, status: 'connected', itemCount: items.length, lastSync: new Date().toISOString() },
+    items,
+    userName: user.Name,
+  };
+}
+
 export async function buildAuthenticatedStreamUrl(item: MediaItem, server: MediaServerConfig): Promise<string> {
   if (!item.serverItemId || !item.serverId) return item.streamUrl;
   const token = await getServerCredential(item.serverId, 'token');

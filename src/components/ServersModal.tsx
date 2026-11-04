@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { MediaServerConfig } from '../types';
 import { saveServerCredentials } from '../services/secureVault';
-import { connectJellyfinOrEmby } from '../services/mediaServerClient';
+import { connectJellyfinOrEmby, connectJellyfinQuickConnect } from '../services/mediaServerClient';
 import {
   Server,
   Plus,
@@ -40,6 +40,7 @@ export const ServersModal: React.FC<ServersModalProps> = ({
   const [token, setToken] = useState('');
   const [testingStatus, setTestingStatus] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [quickConnectCode, setQuickConnectCode] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -86,6 +87,46 @@ export const ServersModal: React.FC<ServersModalProps> = ({
       setToken('');
     } catch (error) {
       setTestingStatus(error instanceof Error ? error.message : 'เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ');
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+
+  const handleQuickConnect = async () => {
+    const normalizedUrl = serverUrl.trim();
+    if (!normalizedUrl) {
+      setTestingStatus('กรุณากรอก Server URL ของ Jellyfin ก่อน');
+      return;
+    }
+    setIsConnecting(true);
+    setQuickConnectCode(null);
+    setTestingStatus('กำลังเริ่ม Quick Connect...');
+    try {
+      const parsedUrl = new URL(normalizedUrl);
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) throw new Error('รองรับเฉพาะ URL แบบ HTTP หรือ HTTPS');
+      const server: MediaServerConfig = {
+        id: `srv-${Date.now()}`,
+        name: serverName.trim() || 'Jellyfin Server',
+        type: 'jellyfin',
+        url: parsedUrl.toString().replace(/\/$/, ''),
+        status: 'connecting',
+        itemCount: 0,
+      };
+      const result = await connectJellyfinQuickConnect(server, (code) => {
+        setQuickConnectCode(code);
+        setTestingStatus('เปิด Jellyfin บนมือถือหรือคอมพิวเตอร์ ไปที่ Quick Connect แล้วกรอกรหัสนี้เพื่ออนุมัติ');
+      });
+      onAddServer(result.server, result.items);
+      setTestingStatus(`เชื่อมต่อสำเร็จ · ${result.items.length.toLocaleString()} รายการ${result.userName ? ` · ${result.userName}` : ''}`);
+      setQuickConnectCode(null);
+      setActiveTab('list');
+      setServerName('');
+      setServerUrl('');
+      setUsername('');
+      setToken('');
+    } catch (error) {
+      setTestingStatus(error instanceof Error ? error.message : 'Quick Connect ไม่สำเร็จ');
     } finally {
       setIsConnecting(false);
     }
@@ -301,6 +342,27 @@ export const ServersModal: React.FC<ServersModalProps> = ({
                 />
               </div>
             </div>
+
+            {serverType === 'jellyfin' && (
+              <div className="flex flex-col gap-2 p-3 rounded-xl bg-purple-500/5 border border-purple-500/15">
+                <div className="text-xs text-slate-300">Quick Connect — ไม่ต้องกรอก Username หรือ Password</div>
+                <button
+                  type="button"
+                  onClick={handleQuickConnect}
+                  disabled={isConnecting || !serverUrl.trim()}
+                  className="w-full py-2.5 rounded-xl bg-purple-500/15 border border-purple-400/25 text-purple-200 text-xs font-semibold hover:bg-purple-500/25 disabled:opacity-40"
+                >
+                  {isConnecting ? 'กำลังรอการอนุมัติ...' : 'เริ่ม Quick Connect'}
+                </button>
+                {quickConnectCode && (
+                  <div className="text-center py-2">
+                    <div className="text-[10px] text-slate-400 mb-1">กรอกรหัสนี้ใน Jellyfin เพื่ออนุมัติการเชื่อมต่อ</div>
+                    <div className="text-3xl font-mono font-bold tracking-[0.35em] text-white">{quickConnectCode}</div>
+                    <div className="text-[10px] text-slate-500 mt-1">รอการอนุมัติได้สูงสุด 2 นาที</div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Connection status feedback */}
             {testingStatus && (
