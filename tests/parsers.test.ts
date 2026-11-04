@@ -105,3 +105,9 @@ test('Playlist resolver rejects HTML pages without an embedded playlist', async 
   const { resolvePlaylistContent } = await import('../src/utils/playlistResolver');
   assert.throws(() => resolvePlaylistContent('<html><body><h1>Please sign in</h1></body></html>'), /ไม่พบข้อมูล Playlist/);
 });
+
+test('Smart playlist input resolver auto-detects W3U and M3U without extensions', async () => {
+  const { resolvePlaylistContent } = await import('../src/utils/playlistResolver');
+  assert.equal(resolvePlaylistContent('#EXTM3U\\n#EXTINF:-1,Auto M3U\\nhttps://stream.test/a').type, 'm3u');
+  assert.equal(resolvePlaylistContent(JSON.stringify({ stations: [{ name: 'Auto W3U', url: 'https://stream.test/b' }] })).type, 'w3u');
+});
